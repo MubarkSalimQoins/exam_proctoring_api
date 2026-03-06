@@ -71,39 +71,149 @@
 #         }
 #         for event in events
 #     ]
+# from fastapi import APIRouter, Depends, HTTPException
+# from sqlalchemy.orm import Session
+# from pydantic import BaseModel
+# from typing import List, Optional, Literal
+# from datetime import datetime
+
+# from app.database import get_db
+# from app.models import CheatingEvent, Notification
+
+# router = APIRouter(
+#     prefix="/cheating-events",
+#     tags=["Cheating Events"]
+# )
+
+# ===== Schema =====
+# class CheatingEventCreate(BaseModel):
+#     student_id: int
+#     cheating_type_id: int
+#     status: Literal["suspected", "confirmed", "rejected"]
+#     confidence_score: float
+#     snapshot_path: Optional[str] = None
+#     video_path: Optional[str] = None
+    # ❌ لا نأخذ الوقت من المستخدم
+    # event_time يحسبه النظام تلقائيًا
+
+
+# ===== Create Cheating Event =====
+# @router.post("/")
+# def create_cheating_event(
+#     event: CheatingEventCreate,
+#     db: Session = Depends(get_db)
+# ):
+#     try:
+#         db_event = CheatingEvent(
+#             student_id=event.student_id,
+#             cheating_type_id=event.cheating_type_id,
+#             status=event.status,
+#             confidence_score=event.confidence_score,
+#             snapshot_path=event.snapshot_path,
+#             video_path=event.video_path,
+#             event_time=datetime.now()
+#         )
+
+#         db.add(db_event)
+#         db.commit()
+#         db.refresh(db_event)
+
+        # إنشاء إشعار
+    #     notification = Notification(
+    #         event_id=db_event.event_id,
+    #         supervisor_id=1,  # مؤقتًا (نربطه لاحقًا بالمشرف الحقيقي)
+    #         message=f"تم رصد حالة غش للطالب رقم {event.student_id}",
+    #         is_read=False
+    #     )
+
+    #     db.add(notification)
+    #     db.commit()
+
+    #     return {
+    #         "event_id": db_event.event_id,
+    #         "message": "تم تسجيل حالة الغش بنجاح"
+    #     }
+
+    # except Exception as e:
+    #     db.rollback()
+    #     raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== Get Student Cheating Events =====
+# @router.get("/{student_id}")
+# def get_student_cheating_events(
+#     student_id: int,
+#     db: Session = Depends(get_db)
+# ):
+#     events = (
+#         db.query(CheatingEvent)
+#         .filter(CheatingEvent.student_id == student_id)
+#         .all()
+#     )
+
+#     return [
+#         {
+#             "event_id": event.event_id,
+#             "student_id": event.student_id,
+#             "cheating_type_id": event.cheating_type_id,
+#             "status": event.status,
+#             "confidence_score": float(event.confidence_score) if event.confidence_score else None,
+#             "snapshot_path": event.snapshot_path,
+#             "video_path": event.video_path,
+#             "event_time": event.event_time,
+#             "created_at": event.created_at
+#         }
+#         for event in events
+#     ]
+# --------------------------------------------------------------------
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional, Literal
+from typing import Optional, Literal
 from datetime import datetime
 
 from app.database import get_db
-from app.models import CheatingEvent, Notification
+from app.models import CheatingEvent, Notification, Student
 
 router = APIRouter(
     prefix="/cheating-events",
     tags=["Cheating Events"]
 )
 
-# ===== Schema =====
+# ==============================
+# Schema
+# ==============================
 class CheatingEventCreate(BaseModel):
     student_id: int
     cheating_type_id: int
-    status: Literal["suspected", "confirmed", "rejected"]
-    confidence_score: float
+    status: Literal["suspected", "confirmed", "rejected"] = "suspected"
+    confidence_score: float = 0.0
     snapshot_path: Optional[str] = None
     video_path: Optional[str] = None
-    # ❌ لا نأخذ الوقت من المستخدم
-    # event_time يحسبه النظام تلقائيًا
 
 
-# ===== Create Cheating Event =====
+# ==============================
+# Create Cheating Event
+# ==============================
 @router.post("/")
 def create_cheating_event(
     event: CheatingEventCreate,
     db: Session = Depends(get_db)
 ):
     try:
+
+        # التأكد أن الطالب موجود
+        student = db.query(Student).filter(
+            Student.student_id == event.student_id
+        ).first()
+
+        if not student:
+            raise HTTPException(
+                status_code=404,
+                detail="Student not found"
+            )
+
+        # إنشاء سجل الغش
         db_event = CheatingEvent(
             student_id=event.student_id,
             cheating_type_id=event.cheating_type_id,
@@ -118,11 +228,11 @@ def create_cheating_event(
         db.commit()
         db.refresh(db_event)
 
-        # إنشاء إشعار
+        # إنشاء إشعار للمشرف
         notification = Notification(
             event_id=db_event.event_id,
-            supervisor_id=1,  # مؤقتًا (نربطه لاحقًا بالمشرف الحقيقي)
-            message=f"تم رصد حالة غش للطالب رقم {event.student_id}",
+            supervisor_id=1,  # مؤقت
+            message=f"تم رصد حالة غش للطالب {student.name}",
             is_read=False
         )
 
@@ -130,7 +240,11 @@ def create_cheating_event(
         db.commit()
 
         return {
+            "status": "success",
             "event_id": db_event.event_id,
+            "student_id": student.student_id,
+            "student_name": student.name,
+            "cheating_type_id": event.cheating_type_id,
             "message": "تم تسجيل حالة الغش بنجاح"
         }
 
@@ -139,29 +253,37 @@ def create_cheating_event(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ===== Get Student Cheating Events =====
+# ==============================
+# Get Student Cheating Events
+# ==============================
 @router.get("/{student_id}")
 def get_student_cheating_events(
     student_id: int,
     db: Session = Depends(get_db)
 ):
-    events = (
-        db.query(CheatingEvent)
-        .filter(CheatingEvent.student_id == student_id)
-        .all()
-    )
+    try:
 
-    return [
-        {
-            "event_id": event.event_id,
-            "student_id": event.student_id,
-            "cheating_type_id": event.cheating_type_id,
-            "status": event.status,
-            "confidence_score": float(event.confidence_score) if event.confidence_score else None,
-            "snapshot_path": event.snapshot_path,
-            "video_path": event.video_path,
-            "event_time": event.event_time,
-            "created_at": event.created_at
-        }
-        for event in events
-    ]
+        events = (
+            db.query(CheatingEvent)
+            .filter(CheatingEvent.student_id == student_id)
+            .all()
+        )
+
+        return [
+            {
+                "event_id": event.event_id,
+                "student_id": event.student_id,
+                "cheating_type_id": event.cheating_type_id,
+                "status": event.status,
+                "confidence_score": float(event.confidence_score)
+                if event.confidence_score else None,
+                "snapshot_path": event.snapshot_path,
+                "video_path": event.video_path,
+                "event_time": event.event_time,
+                "created_at": event.created_at
+            }
+            for event in events
+        ]
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
