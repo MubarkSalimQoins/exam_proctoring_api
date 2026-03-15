@@ -243,3 +243,4 @@ class FaceService:
                 "match": False,
                 "error": str(e)
             }
+            

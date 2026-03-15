@@ -33,28 +33,56 @@
 # cap.release()
 # cv2.destroyAllWindows()
 # اختبار الصوت
-from app.services.audio_service import AudioService
-import time
+# from app.services.audio_service import AudioService
+# import time
 
-audio = AudioService()
+# audio = AudioService()
 
-# تشغيل مراقبة الصوت
-audio.start()
+# # تشغيل مراقبة الصوت
+# audio.start()
 
-print("🎤 تكلم أو اصدر صوت قريب من المايكروفون")
+# print("🎤 تكلم أو اصدر صوت قريب من المايكروفون")
+
+# try:
+#     while True:
+
+#         event = audio.detect_noise()
+
+#         if event:
+#             print("🚨 تم اكتشاف صوت:", event)
+
+#         time.sleep(1)
+
+# except KeyboardInterrupt:
+#     print("⏹ تم إيقاف الاختبار")
+
+# audio.stop()
+# -------------------------------------------------
+# اختبر الايميل
+import smtplib
+from email.mime.text import MIMEText
+
+sender_email = "alqwynsnasr@gmail.com"
+password = "qigwuvrqwivyndxo"
+receiver_email = "mbarkalqwyns18@gmail.com"
+
+subject = "اختبار إرسال الإيميل"
+body = "تم إرسال هذا الإيميل بنجاح من نظام مراقبة الامتحانات."
+
+msg = MIMEText(body)
+msg["Subject"] = subject
+msg["From"] = sender_email
+msg["To"] = receiver_email
 
 try:
-    while True:
+    server = smtplib.SMTP("smtp.gmail.com", 587, timeout=30)
+    server.starttls()
+    server.login(sender_email, password)
+    server.sendmail(sender_email, receiver_email, msg.as_string())
+    server.quit()
 
-        event = audio.detect_noise()
+    print("✅ تم إرسال الإيميل بنجاح")
 
-        if event:
-            print("🚨 تم اكتشاف صوت:", event)
-
-        time.sleep(1)
-
-except KeyboardInterrupt:
-    print("⏹ تم إيقاف الاختبار")
-
-audio.stop()
-
+except Exception as e:
+    print("❌ حدث خطأ:", e)
+    
