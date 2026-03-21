@@ -147,7 +147,7 @@ class EmailService:
         subject = "🚨 تنبيه: اكتشاف حالة غش"
 
         body = f"""
-        <h2 style="color:red;">🚨 تم اكتشاف حالة غش</h2>
+        <h2 style="color:red;">🚨  تم اكتشاف حالة غش يرجى مراجعة لوحه التحكم</h2>
 
         <p><b>اسم الطالب:</b> {student_name}</p>
         <p><b>رقم الطالب:</b> {student_number}</p>
@@ -183,7 +183,8 @@ class EmailService:
 
             msg.attach(part)
 
-        # 🎥 إرفاق فيديو
+        # 🎥 إرفاق فيديو (تم التعليق لإيقاف الإرسال)
+        """
         if video_path and os.path.exists(video_path):
 
             with open(video_path, "rb") as f:
@@ -199,6 +200,7 @@ class EmailService:
             )
 
             msg.attach(part)
+        """
 
         # 📧 إرسال الإيميل مع إعادة المحاولة
         for attempt in range(3):
