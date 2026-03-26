@@ -120,7 +120,6 @@ from email import encoders
 class EmailService:
 
     def __init__(self):
-
         self.smtp_server = "smtp.gmail.com"
         self.smtp_port = 587
 
@@ -132,7 +131,6 @@ class EmailService:
 
         # بريد المشرف
         self.supervisor_email = "mbarkalqwyns18@gmail.com"
-
 
     def send_cheating_alert(
         self,
@@ -166,63 +164,43 @@ class EmailService:
 
         msg.attach(MIMEText(body, "html"))
 
+        # تم تعطيل إرفاق الصورة والفيديو لمنع إرسال أي مرفقات
+        """
         # 📷 إرفاق صورة
         if snapshot_path and os.path.exists(snapshot_path):
-
             with open(snapshot_path, "rb") as f:
-
                 part = MIMEBase("application", "octet-stream")
                 part.set_payload(f.read())
-
             encoders.encode_base64(part)
-
             part.add_header(
                 "Content-Disposition",
                 f"attachment; filename={os.path.basename(snapshot_path)}"
             )
-
             msg.attach(part)
 
-        # 🎥 إرفاق فيديو (تم التعليق لإيقاف الإرسال)
-        """
+        # 🎥 إرفاق فيديو
         if video_path and os.path.exists(video_path):
-
             with open(video_path, "rb") as f:
-
                 part = MIMEBase("application", "octet-stream")
                 part.set_payload(f.read())
-
             encoders.encode_base64(part)
-
             part.add_header(
                 "Content-Disposition",
                 f"attachment; filename={os.path.basename(video_path)}"
             )
-
             msg.attach(part)
         """
 
         # 📧 إرسال الإيميل مع إعادة المحاولة
         for attempt in range(3):
-
             try:
-
                 server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=30)
-
                 server.starttls()
-
                 server.login(self.sender_email, self.password)
-
                 server.send_message(msg)
-
                 server.quit()
-
-                print("📧 تم إرسال تنبيه الغش عبر الإيميل")
-
+                print("📧 تم إرسال تنبيه الغش عبر الإيميل (بدون مرفقات)")
                 break
-
             except Exception as e:
-
                 print("❌ فشل الإرسال، إعادة المحاولة...", e)
-
                 time.sleep(5)
