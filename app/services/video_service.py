@@ -521,7 +521,7 @@ from app.services.object_detection import ObjectDetectionService
 from app.services.head_pose_service import HeadPoseService
 from app.services.audio_service import AudioService
 from app.services.email_service import EmailService
-import pymysql  # استخدم PyMySQL بدل mysql.connector
+import pymysql  # PyMySQL للاتصال بقاعدة البيانات
 
 class VideoMonitoringService:
     def __init__(self):
@@ -553,8 +553,8 @@ class VideoMonitoringService:
         self.video_before_seconds = 3
         self.video_after_seconds = 7
         self.email_enabled = True
-        self.save_video = True
-        self.save_snapshot = True
+        self.enable_video = True
+        self.enable_snapshot = True
 
         # =========================
         # تحميل الإعدادات من قاعدة البيانات
@@ -581,9 +581,9 @@ class VideoMonitoringService:
                 elif key == "email_enabled":
                     self.email_enabled = value == "1"
                 elif key == "save_video":
-                    self.save_video = value == "1"
+                    self.enable_video = value == "1"
                 elif key == "save_snapshot":
-                    self.save_snapshot = value == "1"
+                    self.enable_snapshot = value == "1"
             cursor.close()
             conn.close()
             print("✅ تم تحميل إعدادات النظام من قاعدة البيانات")
@@ -603,7 +603,7 @@ class VideoMonitoringService:
     # حفظ صورة
     # =========================
     def save_snapshot(self, frame):
-        if not self.save_snapshot:
+        if not self.enable_snapshot:
             return None, None
         timestamp = int(time.time())
         filename = f"snapshot_{timestamp}.jpg"
@@ -645,7 +645,7 @@ class VideoMonitoringService:
     # حفظ فيديو MP4
     # =========================
     def save_video_clip(self, cap):
-        if not self.save_video or len(self.frame_buffer) == 0:
+        if not self.enable_video or len(self.frame_buffer) == 0:
             print("⚠ لن يتم حفظ الفيديو")
             return None, None
 
@@ -734,8 +734,8 @@ class VideoMonitoringService:
                     student_number=self.student_id,
                     cheating_type=cheating["type_ar"],
                     confidence=cheating["confidence"],
-                    snapshot_path=snapshot_full if self.save_snapshot else None,
-                    video_path=video_full if self.save_video else None
+                    snapshot_path=snapshot_full if self.enable_snapshot else None,
+                    video_path=video_full if self.enable_video else None
                 )
                 print("📧 تم إرسال الإيميل")
 
@@ -803,4 +803,3 @@ class VideoMonitoringService:
         self.audio_service.stop()
         cap.release()
         cv2.destroyAllWindows()
-        
