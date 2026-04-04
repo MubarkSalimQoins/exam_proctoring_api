@@ -509,6 +509,7 @@
 #         cap.release()
 #         cv2.destroyAllWindows()
 # -------------------------------------------
+# الكود الصح حاليا
 import cv2
 import time
 import requests
@@ -803,3 +804,292 @@ class VideoMonitoringService:
         self.audio_service.stop()
         cap.release()
         cv2.destroyAllWindows()
+# --------------------------------------------------------------
+# import cv2
+# import time
+# import requests
+# import os
+# import subprocess
+# import threading
+# import winsound
+# from collections import deque
+# import pymysql
+
+# from app.services.face_service import FaceService
+# from app.services.object_detection import ObjectDetectionService
+# from app.services.head_pose_service import HeadPoseService
+# from app.services.audio_service import AudioService
+# from app.services.email_service import EmailService
+
+
+# class VideoMonitoringService:
+#     def __init__(self):
+#         self.face_service = FaceService()
+#         self.object_detector = ObjectDetectionService()
+#         self.head_pose_service = HeadPoseService()
+#         self.audio_service = AudioService()
+#         self.email_service = EmailService()
+
+#         self.identity_verified = False
+#         self.student_id = None
+#         self.student_name = None
+
+#         self.last_cheating_time = {}
+#         self.cooldown = 5
+
+#         # إعدادات افتراضية
+#         self.video_before_seconds = 3
+#         self.video_after_seconds  = 7
+#         self.email_enabled        = True
+#         self.enable_video         = True
+#         self.enable_snapshot      = True
+
+#         # تحميل الإعدادات من قاعدة البيانات
+#         try:
+#             conn = pymysql.connect(
+#                 host="localhost", user="root", password="",
+#                 database="exam_monitoring", charset="utf8mb4",
+#                 cursorclass=pymysql.cursors.DictCursor
+#             )
+#             cursor = conn.cursor()
+#             cursor.execute("SELECT setting_key, setting_value FROM settings")
+#             for s in cursor.fetchall():
+#                 key, value = s["setting_key"], s["setting_value"]
+#                 if key == "video_before_seconds":  self.video_before_seconds = int(value)
+#                 elif key == "video_after_seconds": self.video_after_seconds  = int(value)
+#                 elif key == "email_enabled":       self.email_enabled        = value == "1"
+#                 elif key == "save_video":          self.enable_video         = value == "1"
+#                 elif key == "save_snapshot":       self.enable_snapshot      = value == "1"
+#             cursor.close()
+#             conn.close()
+#             print("✅ تم تحميل إعدادات النظام من قاعدة البيانات")
+#         except Exception as e:
+#             print("⚠ فشل تحميل الإعدادات:", e)
+
+#         self.evidence_dir = "C:/xampp/htdocs/exam_monitoring2/evidence"
+#         os.makedirs(self.evidence_dir, exist_ok=True)
+
+#         self.exam_started = False
+#         self.frame_buffer = deque()  # maxlen يُحدد بعد معرفة FPS
+
+#     # =========================
+#     # حفظ صورة
+#     # =========================
+#     def save_snapshot(self, frame):
+#         if not self.enable_snapshot:
+#             return None, None
+#         timestamp = int(time.time())
+#         filename  = f"snapshot_{timestamp}.jpg"
+#         full_path = os.path.join(self.evidence_dir, filename)
+#         cv2.imwrite(full_path, frame)
+#         print(f"📸 تم حفظ الصورة: {full_path}")
+#         return full_path, "evidence/" + filename
+
+#     # =========================
+#     # تحويل الفيديو لـ H.264
+#     # =========================
+#     def _convert_to_h264(self, input_path, output_path):
+#         try:
+#             cmd = [
+#                 "ffmpeg", "-y",
+#                 "-i", input_path,
+#                 "-c:v", "libx264",
+#                 "-preset", "fast",
+#                 "-crf", "23",
+#                 "-pix_fmt", "yuv420p",
+#                 "-movflags", "+faststart",
+#                 "-an",
+#                 output_path
+#             ]
+#             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+#             if result.returncode != 0:
+#                 print("❌ FFmpeg error:", result.stderr.decode())
+#                 return False
+#             print("✅ تم التحويل لـ H.264 بنجاح")
+#             return True
+#         except FileNotFoundError:
+#             print("❌ FFmpeg غير مثبت — شغّل: winget install ffmpeg")
+#             return False
+#         except subprocess.TimeoutExpired:
+#             print("❌ FFmpeg استغرق وقتاً طويلاً")
+#             return False
+
+#     # =========================
+#     # حفظ فيديو — من قوائم جاهزة بدون لمس cap
+#     # =========================
+#     def save_video_clip(self, before_frames, after_frames):
+#         if not self.enable_video:
+#             print("⚠ حفظ الفيديو معطّل من الإعدادات")
+#             return None, None
+
+#         all_frames = list(before_frames) + list(after_frames)
+#         if not all_frames:
+#             print("⚠ لا يوجد فريمات للحفظ")
+#             return None, None
+
+#         timestamp  = int(time.time())
+#         temp_path  = os.path.join(self.evidence_dir, f"temp_{timestamp}.avi")
+#         final_path = os.path.join(self.evidence_dir, f"video_{timestamp}.mp4")
+
+#         height, width, _ = all_frames[0].shape
+#         fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+#         out    = cv2.VideoWriter(temp_path, fourcc, 20.0, (width, height))
+
+#         if not out.isOpened():
+#             print("❌ فشل إنشاء الفيديو المؤقت")
+#             return None, None
+
+#         for f in all_frames:
+#             out.write(f)
+#         out.release()
+#         print(f"📊 عدد الفريمات: {len(all_frames)}")
+
+#         success = self._convert_to_h264(temp_path, final_path)
+#         if os.path.exists(temp_path):
+#             os.remove(temp_path)
+
+#         if not success or not os.path.exists(final_path) or os.path.getsize(final_path) == 0:
+#             print("❌ الفيديو النهائي فارغ أو فشل التحويل")
+#             return None, None
+
+#         print(f"🎬 تم حفظ الفيديو: {final_path}")
+#         relative = f"evidence/video_{timestamp}.mp4"
+#         return final_path, relative
+
+#     # =========================
+#     # إنذار صوتي
+#     # =========================
+#     def play_alarm(self):
+#         try:
+#             winsound.Beep(2000, 700)
+#         except:
+#             pass
+
+#     # =========================
+#     # إرسال حالة الغش في thread منفصل
+#     # =========================
+#     def send_cheating_event(self, cheating, frame, before_frames):
+#         cheating_type_id = cheating["cheating_type_id"]
+#         current_time     = time.time()
+
+#         if cheating_type_id in self.last_cheating_time:
+#             if current_time - self.last_cheating_time[cheating_type_id] < self.cooldown:
+#                 return
+
+#         self.last_cheating_time[cheating_type_id] = current_time
+
+#         # صوت فوري عند الكشف
+#         self.play_alarm()
+#         print(f"🚨 تم كشف غش: {cheating['type_ar']}")
+
+#         # نسخ فريمات قبل الغش فوراً قبل ما تتغير
+#         before_copy = list(before_frames)
+
+#         def _worker():
+#             # انتظر video_after_seconds لجمع فريمات بعد الغش
+#             time.sleep(self.video_after_seconds)
+#             after_copy = list(self.frame_buffer)
+
+#             try:
+#                 snapshot_full, snapshot_relative = self.save_snapshot(frame)
+#                 video_full, video_relative       = self.save_video_clip(before_copy, after_copy)
+
+#                 if video_relative:
+#                     print(f"🎬 الفيديو جاهز: {video_relative}")
+#                 else:
+#                     print("⚠ لن يتم إرسال فيديو")
+
+#                 data = {
+#                     "student_id":       self.student_id,
+#                     "cheating_type_id": cheating_type_id,
+#                     "status":           "suspected",
+#                     "confidence_score": cheating["confidence"],
+#                     "snapshot_path":    snapshot_relative,
+#                     "video_path":       video_relative if video_relative else None,
+#                 }
+
+#                 print("📡 جاري الإرسال للسيرفر...")
+#                 print(data)
+#                 response = requests.post("http://127.0.0.1:8000/cheating-events/", json=data)
+#                 print(f"📥 رد السيرفر: {response.status_code}")
+#                 print(f"🚨 حالة غش: {cheating['type_ar']}")
+
+#                 if self.email_enabled:
+#                     self.email_service.send_cheating_alert(
+#                         student_name=self.student_name,
+#                         student_number=self.student_id,
+#                         cheating_type=cheating["type_ar"],
+#                         confidence=cheating["confidence"],
+#                         snapshot_path=snapshot_full if self.enable_snapshot else None,
+#                         video_path=video_full if self.enable_video else None,
+#                     )
+#                     print("📧 تم إرسال الإيميل")
+
+#             except Exception as e:
+#                 print("❌ خطأ:", e)
+
+#         threading.Thread(target=_worker, daemon=True).start()
+
+#     # =========================
+#     # تشغيل النظام
+#     # =========================
+#     def start_monitoring(self):
+#         cap = cv2.VideoCapture(0)
+#         if not cap.isOpened():
+#             print("❌ لا يمكن فتح الكاميرا")
+#             return
+
+#         print("🎥 تم تشغيل الكاميرا")
+#         self.audio_service.start()
+
+#         fps = cap.get(cv2.CAP_PROP_FPS) or 20
+#         self.frame_buffer = deque(maxlen=int(fps * self.video_before_seconds))
+
+#         start_time = time.time()
+
+#         while True:
+#             ret, frame = cap.read()
+#             if not ret:
+#                 break
+
+#             self.frame_buffer.append(frame.copy())
+
+#             if not self.identity_verified:
+#                 if time.time() - start_time <= 5:
+#                     result = self.face_service.identify_student(frame)
+#                     if result["match"]:
+#                         self.identity_verified = True
+#                         self.student_id        = result["student_id"]
+#                         self.student_name      = result["student_name"]
+#                         print(f"✅ تم التعرف على الطالب: {self.student_name}")
+#                 else:
+#                     print("❌ فشل التحقق من الهوية")
+#                     break
+#             else:
+#                 cv2.putText(frame, "Exam Started", (20, 40),
+#                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
+
+#                 cheating_events = []
+#                 cheating_events.extend(self.object_detector.detect_cheating(frame))
+
+#                 head = self.head_pose_service.detect_head_pose(frame)
+#                 if head:
+#                     cheating_events.append(head)
+
+#                 audio = self.audio_service.detect_noise()
+#                 if audio:
+#                     cheating_events.append(audio)
+
+#                 for cheating in cheating_events:
+#                     # نمرر نسخة من buffer الحالي — لا نلمس cap أبداً
+#                     self.send_cheating_event(cheating, frame, self.frame_buffer)
+#                     cv2.putText(frame, f"Cheating: {cheating['type_ar']}",
+#                                 (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
+#             cv2.imshow("Exam Monitoring", frame)
+#             if cv2.waitKey(1) & 0xFF == 27:
+#                 break
+
+#         self.audio_service.stop()
+#         cap.release()
+#         cv2.destroyAllWindows()
