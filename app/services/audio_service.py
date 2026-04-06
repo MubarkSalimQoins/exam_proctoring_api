@@ -62,7 +62,8 @@ class AudioService:
 
         self.sample_rate = 16000
         self.duration = 1
-        self.noise_threshold = 0.0008
+        # self.noise_threshold = 0.0008
+        self.noise_threshold = 0.8
 
         self.running = False
         self.last_event = None

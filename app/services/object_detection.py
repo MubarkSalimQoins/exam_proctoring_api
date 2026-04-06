@@ -533,18 +533,19 @@ class ObjectDetectionService:
         self.cheating_map["smartphone"] = "استخدام الهاتف"
 
         self.cheating_type_ids = {
-            "استخدام الهاتف": 1,
-            "استخدام سماعات": 2,
-            "وجود شخص آخر": 3,
+            "استخدام الهاتف": 1,#4
+            "استخدام سماعات": 3,#3
+            "وجود شخص آخر": 2,#2
         }
+        
 
-        self.phone_threshold = 0.55
+        self.phone_threshold = 0.35
         self.earphone_threshold = 0.30
 
         self.confirm_frames_needed = {
-            "استخدام الهاتف": 3,
-            "استخدام سماعات": 2,
-            "وجود شخص آخر": 4,
+            "استخدام الهاتف": 1,#4
+            "استخدام سماعات": 1,#3
+            "وجود شخص آخر": 4,#4
         }
 
         self.consecutive_count = defaultdict(int)
