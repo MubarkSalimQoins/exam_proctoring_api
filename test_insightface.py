@@ -581,7 +581,7 @@
 #     print(f"Resolution: {int(width)}x{int(height)}")
 
 # cap.release()
-# ---------------------------------- تجربه الراس بالكيمرا الخارجيه 
+# ---------------------------------- تجربه الراس بالكيمرا الخارجيه
 # import cv2
 # import time
 # import insightface
