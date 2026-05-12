@@ -59,30 +59,45 @@
 # audio.stop()
 # -------------------------------------------------
 # اختبر الايميل
-import smtplib
-from email.mime.text import MIMEText
+# import smtplib
+# from email.mime.text import MIMEText
 
-sender_email = "alqwynsnasr@gmail.com"
-password = "qigwuvrqwivyndxo"
-receiver_email = "mbarkalqwyns18@gmail.com"
+# sender_email = "alqwynsnasr@gmail.com"
+# password = "qigwuvrqwivyndxo"
+# receiver_email = "mbarkalqwyns18@gmail.com"
 
-subject = "اختبار إرسال الإيميل"
-body = "تم إرسال هذا الإيميل بنجاح من نظام مراقبة الامتحانات."
+# subject = "اختبار إرسال الإيميل"
+# body = "تم إرسال هذا الإيميل بنجاح من نظام مراقبة الامتحانات."
 
-msg = MIMEText(body)
-msg["Subject"] = subject
-msg["From"] = sender_email
-msg["To"] = receiver_email
+# msg = MIMEText(body)
+# msg["Subject"] = subject
+# msg["From"] = sender_email
+# msg["To"] = receiver_email
 
-try:
-    server = smtplib.SMTP("smtp.gmail.com", 587, timeout=30)
-    server.starttls()
-    server.login(sender_email, password)
-    server.sendmail(sender_email, receiver_email, msg.as_string())
-    server.quit()
+# try:
+#     server = smtplib.SMTP("smtp.gmail.com", 587, timeout=30)
+#     server.starttls()
+#     server.login(sender_email, password)
+#     server.sendmail(sender_email, receiver_email, msg.as_string())
+#     server.quit()
 
-    print("✅ تم إرسال الإيميل بنجاح")
+#     print("✅ تم إرسال الإيميل بنجاح")
 
-except Exception as e:
-    print("❌ حدث خطأ:", e)
-    
+# except Exception as e:
+#     print("❌ حدث خطأ:", e)
+# ---------اختبار الصوت
+# import os
+# import winsound
+
+# sound_path = os.path.join(os.path.dirname(__file__), "alarm.wav")
+
+# print(sound_path)
+
+# winsound.PlaySound(
+#     sound_path,
+#     winsound.SND_FILENAME
+# )
+# ------اختبار رقم ميكرفون
+import sounddevice as sd
+
+print(sd.query_devices())
