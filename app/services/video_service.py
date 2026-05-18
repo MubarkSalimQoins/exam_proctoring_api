@@ -1136,7 +1136,12 @@ from app.services.email_service import EmailService
 import pymysql  # PyMySQL للاتصال بقاعدة البيانات
 
 class VideoMonitoringService:
-    def __init__(self):
+    def __init__(self, camera_url=None):
+        # =========================
+        # تخزين رابط الكاميرا
+        # =========================
+        self.camera_url = camera_url
+        
         # =========================
         # خدمات النظام
         # =========================
@@ -1485,31 +1490,50 @@ class VideoMonitoringService:
         # إعدادات الكاميرا
         # =========================
         # استخدام الكاميرا الخارجية (RTSP)
-        # url = "rtsp://admin:TVSHZW@192.168.137.110:554/Streaming/Channels/101"
+        url = "rtsp://admin:TVSHZW@192.168.137.170:554/Streaming/Channels/101"
         
         # استخدام الكاميرا الداخلية (USB/Webcam)
         # cap = cv2.VideoCapture(0)
         
-        camera_url = "rtsp://admin:TVSHZW@192.168.137.110:554/Streaming/Channels/101"
+        # استخدام الرابط الممرر أو الكاميرا الداخلية
+        camera_url = self.camera_url if self.camera_url else 0
+        
+        if isinstance(camera_url, str):
+            print(f"🔗 جاري الاتصال بالكاميرا: {camera_url}")
+        else:
+            print("🔗 جاري استخدام الكاميرا الداخلية...")
         cap = cv2.VideoCapture(camera_url)
         
         if not cap.isOpened():
-            print("❌ لا يمكن فتح الكاميرا، جاري استخدام الكاميرا الداخلية...")
-            cap = cv2.VideoCapture(0)  # Fallback للكاميرا الداخلية
+            print("❌ فشل فتح الكاميرا الخارجية، جاري استخدام الكاميرا الداخلية...")
+            cap = cv2.VideoCapture(0)
             if not cap.isOpened():
                 print("❌ لا يمكن فتح أي كاميرا")
                 return
+
+        print("✅ تم فتح الكاميرا بنجاح")
 
         # تحسينات الكاميرا
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # تقليل buffer
         cap.set(cv2.CAP_PROP_FPS, 30)
         
-        print("🎥 تم تشغيل الكاميرا")
+        # فحص الكاميرا
+        ret, test_frame = cap.read()
+        if not ret:
+            print("⚠️ الكاميرا مفتوحة لكن لا تقرأ فريمات!")
+            # جرب fallback
+            cap.release()
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                print("❌ لا يمكن قراءة من أي كاميرا")
+                return
+        
+        print("🎥 تم تشغيل الكاميرا بنجاح")
         
         # تصغير حجم النافذة
         cv2.namedWindow("Exam Monitoring", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Exam Monitoring", 800, 600)  # حجم أصغر
-        cv2.moveWindow("Exam Monitoring", 100, 100)  # موقع النافذة
+        cv2.resizeWindow("Exam Monitoring", 700, 500)  # حجم أصغر
+        cv2.moveWindow("Exam Monitoring", 100, 50)  # موقع النافذة
         self.audio_service.start()
         start_time = time.time()
 
@@ -1564,6 +1588,7 @@ class VideoMonitoringService:
         self.audio_service.stop()
         cap.release()
         cv2.destroyAllWindows()
+
 
 
 
