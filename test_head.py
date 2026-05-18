@@ -98,6 +98,30 @@
 #     winsound.SND_FILENAME
 # )
 # ------اختبار رقم ميكرفون
-import sounddevice as sd
+# import sounddevice as sd
 
-print(sd.query_devices())
+# print(sd.query_devices())
+# اختبار فريمات الكيمرا 
+import cv2
+import time
+
+cap = cv2.VideoCapture(0)
+
+frame_count = 0
+start_time = time.time()
+
+while frame_count < 100:
+    ret, frame = cap.read()
+    
+    if not ret:
+        break
+
+    frame_count += 1
+
+end_time = time.time()
+
+fps = frame_count / (end_time - start_time)
+
+print("Actual FPS:", fps)
+
+cap.release()

@@ -18,7 +18,7 @@ def main():
     print("🚀 بدء نظام مراقبة الامتحان")
 
     monitor = VideoMonitoringService()
-    # monitor = VideoMonitoringService("rtsp://admin:TVSHZW@192.168.137.99:554/Streaming/Channels/101")
+    # monitor = VideoMonitoringService("rtsp://admin:TVSHZW@192.168.137.40:554/Streaming/Channels/101")
 
     monitor.start_monitoring()
 
