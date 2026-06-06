@@ -9,8 +9,8 @@ class AudioService:
     def __init__(self):
 
         self.sample_rate = 16000
-        self.duration = 0.5  # تقليل من 1 إلى 0.5 ثانية
-        self.noise_threshold = 0.8
+        self.duration = 6  # تقليل من 1 إلى 0.5 ثانية
+        self.noise_threshold = 0.002
 
         self.running = False
         self.last_event = None

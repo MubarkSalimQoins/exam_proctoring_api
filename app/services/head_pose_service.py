@@ -737,10 +737,11 @@
 #     stream.stop()
 #     cv2.destroyAllWindows()
 # -------------------------
-import cv2
-import time
-import insightface
-from collections import defaultdict
+import cv2 #تشغيل الكاميرا ومعالجة الصور والفيديو
+import time #حساب الزمن ومدة استمرار السلوك
+import insightface #مكتبه تتبع حركه الراس
+from collections import defaultdict #تخزين أوقات الحالات دون ظهور أخطاء عند عدم وجود مفتاح
+#
 import winsound  # الصوت على Windows
 
 
@@ -753,21 +754,25 @@ class HeadPoseService:
         self.app.prepare(ctx_id=-1, det_size=(320, 320))  # حجم أصغر للكشف الأسرع
 
         # 🔹 حدود الحركة
-        self.yaw_threshold = 30   # التفت يمين/يسار
-        self.pitch_threshold = 25 # حركة رأس للأعلى/الأسفل
+        self.yaw_threshold = 30   #  التفت يمين/يسار 30 درجه واستمر في الاتفات لمده 0.3 حاله غش
+        self.pitch_threshold = 25 # حركة رأس للأعلى/الأسفل 25 درجه واستمر 0.5
 
         # ⏱️ الوقت بالثواني لتحديد الغش
         self.required_seconds = {
-            "look_away": 0.8,
-            "head_movement": 0.8,
-            "no_face": 5  # وجه مختفي أكثر من 5 ثواني = غش
+            "look_away": 0.5,
+            "head_movement": 0.3,
+            "no_face": 3  # وجه مختفي أكثر من 5 ثواني = غش
         }
 
         # ⏱️ وقت بدء الحالة
+        #وهذا هي مهمه مكتبه التي تمنع الاخطا نفترض انه لايوجد داخل القاموس  لن يتوقف النظام بل سيطبع كلمه نن none 
+        #"look_away": 0.5,
+        # "head_movement": 0.3,
+        # "no_face": 3 
         self.start_time = defaultdict(lambda: None)
 
         # ⛔ منع التكرار
-        self.cooldown = 8  # ثواني
+        self.cooldown = 5  # ثواني
         self.last_reported = {}
 
         print("✅ HeadPose model loaded")

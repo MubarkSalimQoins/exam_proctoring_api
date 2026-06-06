@@ -1243,19 +1243,36 @@ class VideoMonitoringService:
     # =========================
     # تحويل الفيديو لـ H.264
     # =========================
-    def _convert_to_h264(self, input_path, output_path):
+    def _convert_to_h264(self, input_path, output_path, audio_path=None):
         try:
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", input_path,
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "23",
-                "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart",
-                "-an",
-                output_path
-            ]
+            if audio_path and os.path.exists(audio_path):
+                # دمج فيديو + صوت مع إزالة الضوضاء
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", input_path,
+                    "-i", audio_path,
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    "-c:a", "aac",
+                    "-b:a", "192k",  # جودة أعلى
+                    "-af", "highpass=f=200,lowpass=f=3000",  # فلترة لتحسين الوضوح
+                    output_path
+                ]
+            else:
+                # فيديو بدون صوت
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", input_path,
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    output_path
+                ]
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
             if result.returncode != 0:
                 print("❌ FFmpeg error:", result.stderr.decode())
@@ -1268,6 +1285,53 @@ class VideoMonitoringService:
         except subprocess.TimeoutExpired:
             print("❌ FFmpeg استغرق وقتاً طويلاً")
             return False
+
+    # =========================
+    # تسجيل الصوت
+    # =========================
+    def _record_audio_thread(self, audio_file, duration, sample_rate=16000):
+        """تسجيل الصوت في خيط منفصل - مع فلترة محسنة"""
+        try:
+            import sounddevice as sd
+            import numpy as np
+            
+            frames = int(duration * sample_rate)
+            recording = sd.rec(frames, samplerate=sample_rate, channels=1, dtype='float32', blocking=True)
+            sd.wait()
+            
+            # تطبيق noise gate - إزالة الأصوات الضعيفة
+            threshold = 0.02  # حد الضوضاء
+            recording = np.where(np.abs(recording) < threshold, 0, recording)
+            
+            # تطبيق denoise بسيط - متوسّط متحرك
+            if len(recording) > 10:
+                kernel_size = 5
+                padded = np.pad(recording.flatten(), (kernel_size//2, kernel_size//2), mode='edge')
+                smoothed = np.convolve(padded, np.ones(kernel_size)/kernel_size, mode='valid')
+                recording = smoothed.reshape(-1, 1)
+            
+            # Normalize
+            max_val = np.max(np.abs(recording))
+            if max_val > 0.05:  # فقط إذا كان هناك صوت كافٍ
+                recording = recording * (0.9 / max_val)
+                recording = np.clip(recording, -0.95, 0.95)
+            else:
+                recording = recording * 0  # صمت إذا كان الصوت ضعيف جداً
+            
+            # تحويل إلى int16
+            audio_int16 = (recording * 32767).astype('int16')
+            
+            # حفظ كـ WAV
+            import wave
+            with wave.open(audio_file, 'w') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes(audio_int16.tobytes())
+            
+            print(f"🔊 تم تسجيل الصوت: {audio_file}")
+        except Exception as e:
+            print(f"⚠️ فشل تسجيل الصوت: {e}")
 
     # =========================
     # حفظ فيديو MP4
@@ -1286,13 +1350,24 @@ class VideoMonitoringService:
 
         timestamp = int(time.time())
         temp_filename = f"temp_{timestamp}.avi"
+        audio_filename = f"temp_audio_{timestamp}.wav"
         final_filename = f"video_{timestamp}.mp4"
         temp_path = os.path.join(self.evidence_dir, temp_filename)
+        audio_path = os.path.join(self.evidence_dir, audio_filename)
         full_path = os.path.join(self.evidence_dir, final_filename)
 
         height, width, _ = frames_before[0].shape
         fourcc = cv2.VideoWriter_fourcc(*"MJPG")
         out = cv2.VideoWriter(temp_path, fourcc, 20.0, (width, height))
+
+        # بدء تسجيل الصوت في خيط منفصل
+        total_duration = self.video_before_seconds + self.video_after_seconds
+        audio_thread = threading.Thread(
+            target=self._record_audio_thread,
+            args=(audio_path, total_duration, 16000),
+            daemon=True
+        )
+        audio_thread.start()
 
         if not out.isOpened():
             print("❌ فشل إنشاء الفيديو المؤقت")
@@ -1330,9 +1405,16 @@ class VideoMonitoringService:
 
         out.release()
 
-        success = self._convert_to_h264(temp_path, full_path)
+        # انتظار انتهاء تسجيل الصوت
+        audio_thread.join(timeout=total_duration + 2)
+
+        success = self._convert_to_h264(temp_path, full_path, audio_path)
+        
+        # حذف الملفات المؤقتة
         if os.path.exists(temp_path):
             os.remove(temp_path)
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
         if not success:
             return None, None
 
@@ -1431,7 +1513,9 @@ class VideoMonitoringService:
     def _process_frames(self, cap):
         """معالجة الفريمات بشكل غير متزامن"""
         last_yolo_time = 0
-        yolo_interval = 0.15  # YOLO أسرع جداً - كل 0.15 ثانية (~7 مرات في الثانية) للكشف الفوري
+        last_phone_check = 0
+        yolo_interval = 0.1  # YOLO كل 0.1 ثانية
+        phone_check_interval = 0.05  # فحص الهاتف كل 0.05 ثانية (20 مرة/ثانية)
         
         while self.processing_active:
             try:
@@ -1444,10 +1528,22 @@ class VideoMonitoringService:
                 cheating_events = []
                 current_time = time.time()
                 
-                # معالجة YOLO (الأثقل) - بناءً على الوقت وليس عدد الفريمات
+                # فحص الهاتف بشكل منفصل وأسرع!
+                if current_time - last_phone_check >= phone_check_interval:
+                    try:
+                        phone_events = self.object_detector.detect_phone_only(frame)
+                        if phone_events:
+                            cheating_events.extend(phone_events)
+                    except:
+                        pass
+                    last_phone_check = current_time
+                
+                # معالجة YOLO لكل شيء آخر
                 try:
                     if current_time - last_yolo_time >= yolo_interval:
-                        cheating_events.extend(self.object_detector.detect_cheating(frame))
+                        other_events = self.object_detector.detect_other_cheating(frame)
+                        if other_events:
+                            cheating_events.extend(other_events)
                         last_yolo_time = current_time
                 except Exception as yolo_error:
                     print(f"⚠ خطأ في YOLO: {yolo_error}")
@@ -1471,7 +1567,12 @@ class VideoMonitoringService:
                 # إرسال الأحداث
                 for cheating in cheating_events:
                     try:
-                        self.send_cheating_event(cheating, frame, cap)
+                        # إرسال في خيط منفصل чтобы لا يتوقف الكشف
+                        threading.Thread(
+                            target=self.send_cheating_event,
+                            args=(cheating, frame, cap),
+                            daemon=True
+                        ).start()
                     except Exception as send_error:
                         print(f"⚠ خطأ في إرسال الحدث: {send_error}")
                 
@@ -1490,7 +1591,7 @@ class VideoMonitoringService:
         # إعدادات الكاميرا
         # =========================
         # استخدام الكاميرا الخارجية (RTSP)
-        url = "rtsp://admin:TVSHZW@192.168.137.170:554/Streaming/Channels/101"
+        # url = "rtsp://admin:TVSHZW@192.168.137.110:554/Streaming/Channels/101"
         
         # استخدام الكاميرا الداخلية (USB/Webcam)
         # cap = cv2.VideoCapture(0)
@@ -1532,8 +1633,8 @@ class VideoMonitoringService:
         
         # تصغير حجم النافذة
         cv2.namedWindow("Exam Monitoring", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Exam Monitoring", 700, 500)  # حجم أصغر
-        cv2.moveWindow("Exam Monitoring", 100, 50)  # موقع النافذة
+        cv2.resizeWindow("Exam Monitoring", 800, 600)  # حجم أصغر
+        cv2.moveWindow("Exam Monitoring", 100, 100)  # موقع النافذة
         self.audio_service.start()
         start_time = time.time()
 
@@ -1588,6 +1689,10 @@ class VideoMonitoringService:
         self.audio_service.stop()
         cap.release()
         cv2.destroyAllWindows()
+
+
+
+
 
 
 

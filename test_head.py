@@ -105,23 +105,40 @@
 import cv2
 import time
 
-cap = cv2.VideoCapture(0)
+# رابط الكاميرا
+rtsp_url = "rtsp://admin:TVSHZW@192.168.137.48:554/Streaming/Channels/101"
+
+cap = cv2.VideoCapture(rtsp_url)
+
+if not cap.isOpened():
+    print("❌ Failed to connect to camera")
+    exit()
+
+print("🎥 Connected to camera... Measuring FPS")
 
 frame_count = 0
 start_time = time.time()
 
+# قراءة 100 فريم
 while frame_count < 100:
     ret, frame = cap.read()
-    
+
     if not ret:
+        print("❌ Failed to read frame")
         break
 
     frame_count += 1
 
 end_time = time.time()
 
-fps = frame_count / (end_time - start_time)
+elapsed_time = end_time - start_time
 
-print("Actual FPS:", fps)
+if elapsed_time > 0:
+    fps = frame_count / elapsed_time
+    print(f"✅ Frames Read: {frame_count}")
+    print(f"⏱ Time Taken: {elapsed_time:.2f} seconds")
+    print(f"🎯 Actual FPS: {fps:.2f}")
+else:
+    print("❌ Error calculating FPS")
 
 cap.release()

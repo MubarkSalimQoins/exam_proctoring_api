@@ -796,13 +796,13 @@ class ObjectDetectionService:
         }
         
 
-        self.phone_threshold = 0.30  # تقليل من 0.40 لكشف أسرع
-        self.earphone_threshold = 0.35
+        self.phone_threshold = 0.15  #很低 للكشف حتى الجزء الصغير
+        self.earphone_threshold = 0.20  # أقل للسماعات أيضاً
 
         # كشف فوري - فريم واحد فقط
         self.confirm_frames_needed = {
-            "استخدام الهاتف": 1,  # فوري
-            "استخدام سماعات": 2,
+            "استخدام الهاتف": 1,  # فوري - فريم واحد فقط!
+            "استخدام سماعات": 1,  # فوري أيضاً
             "وجود شخص آخر": 1,  # فوري للشخص الثاني
         }
 
@@ -933,6 +933,52 @@ class ObjectDetectionService:
     def detect_cheating(self, frame):
         return self.detect(frame)
 
+    # =========================
+    # كشف الهاتف فقط - سريع جداً
+    # =========================
+    def detect_phone_only(self, frame):
+        """كشف الهاتف بشكل منفصل وأسرع"""
+        # تصغير الفريم
+        height, width = frame.shape[:2]
+        if width > 640:
+            scale = 640 / width
+            frame_resized = cv2.resize(frame, (640, int(height * scale)))
+        else:
+            frame_resized = frame
+            
+        results = self.model(frame_resized, verbose=False, imgsz=640)
+        
+        phone_labels = ["cell phone", "mobile phone", "smartphone"]
+        
+        for result in results:
+            for box in result.boxes:
+                class_id = int(box.cls[0])
+                confidence = float(box.conf[0])
+                label = self.model.names[class_id].lower()
+                
+                if label in phone_labels and confidence > 0.15:  #很低 threshold
+                    # فحص cooldown
+                    now = time.time()
+                    last = self.last_reported.get("استخدام الهاتف", 0)
+                    
+                    if now - last >= self.phone_cooldown:
+                        self.last_reported["استخدام الهاتف"] = now
+                        return [{
+                            "label": label,
+                            "confidence": confidence,
+                            "type_ar": "استخدام الهاتف",
+                            "cheating_type_id": self.cheating_type_ids.get("استخدام الهاتف", 0),
+                        }]
+        
+        return []
+
+    # =========================
+    # كشف الأشياء الأخرى (سماعات + شخص)
+    # =========================
+    def detect_other_cheating(self, frame):
+        """كشف السماعات والشخص بشكل منفصل"""
+        return self.detect(frame)
+
 
 # =========================
 # تشغيل للاختبار فقط
@@ -960,6 +1006,7 @@ if __name__ == "__main__":
 
     cap.release()
     cv2.destroyAllWindows()
+    
         
     
 # ------------------------------------------- كود كاميرا الجهاز
