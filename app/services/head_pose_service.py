@@ -761,7 +761,7 @@ class HeadPoseService:
         self.required_seconds = {
             "look_away": 0.5,
             "head_movement": 0.3,
-            "no_face": 3  # وجه مختفي أكثر من 5 ثواني = غش
+            "no_face": 3  # وجه مختفي أكثر من 2 ثواني = غش
         }
 
         # ⏱️ وقت بدء الحالة
@@ -866,7 +866,7 @@ class HeadPoseService:
                         self.last_reported["head_movement"] = now
                         self.play_alert()
                         return {
-                            "cheating_type_id": 5,
+                            "cheating_type_id": 4,
                             "type_ar": "حركة رأس غير طبيعية",
                             "type_en": "Abnormal Head Movement",
                             "confidence": abs(pitch) / 90

@@ -1427,6 +1427,8 @@ class VideoMonitoringService:
     # =========================
     def play_alarm(self):
         try:
+            # تجاهل صوت الإنذار في الميكروفون
+            self.audio_service.ignore_until = time.time() + 3  # 3 ثواني
             winsound.Beep(2000, 700)
         except:
             pass
