@@ -1,766 +1,9 @@
-# import cv2
-# import time
-# from collections import defaultdict
-# from ultralytics import YOLOWorld
-# import threading
-# import winsound  # إضافة مكتبة الصوت
-
-# # =========================
-# # 🔹 Threaded Video Capture لتجنب تعليق الفيديو
-# class VideoStream:
-#     def __init__(self, url):
-#         self.cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-#         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-#         self.ret, self.frame = self.cap.read()
-#         self.running = True
-#         self.thread = threading.Thread(target=self.update, daemon=True)
-#         self.thread.start()
-
-#     def update(self):
-#         while self.running:
-#             ret, frame = self.cap.read()
-#             if ret:
-#                 self.ret = ret
-#                 self.frame = frame
-
-#     def read(self):
-#         return self.ret, self.frame
-
-#     def stop(self):
-#         self.running = False
-#         self.thread.join()
-#         self.cap.release()
-
-
-# # =========================
-# # 🔹 كشف الغش باستخدام YOLO-World
-# class ObjectDetectionService:
-#     def __init__(self):
-#         print("⏳ Loading YOLO-World model...")
-#         self.model = YOLOWorld("yolov8s-worldv2.pt")
-
-#         self.earphone_aliases = [
-#             "earphone", "earphones", "earbuds", "earbud",
-#             "headphones", "headphone", "wireless earbuds",
-#             "in-ear headphones", "airpods",
-#         ]
-
-#         all_classes = self.earphone_aliases + [
-#             "cell phone", "person", "mobile phone", "smartphone"
-#         ]
-#         self.model.set_classes(all_classes)
-
-#         self.cheating_map = {alias: "استخدام سماعات" for alias in self.earphone_aliases}
-#         self.cheating_map["cell phone"] = "استخدام الهاتف"
-#         self.cheating_map["mobile phone"] = "استخدام الهاتف"
-#         self.cheating_map["smartphone"] = "استخدام الهاتف"
-
-#         self.cheating_type_ids = {
-#             "استخدام الهاتف": 1,
-#             "استخدام سماعات": 3,
-#             "وجود شخص آخر": 2,
-#         }
-
-#         self.phone_threshold = 0.35
-#         self.earphone_threshold = 0.30
-
-#         self.confirm_frames_needed = {
-#             "استخدام الهاتف": 1,
-#             "استخدام سماعات": 2,
-#             "وجود شخص آخر": 4,
-#         }
-
-#         self.consecutive_count = defaultdict(int)
-#         self.cooldown = 8
-#         self.last_reported = {}
-
-#         print("✅ Model loaded successfully")
-
-#     # =========================
-#     # الكشف الأساسي
-#     # =========================
-#     def detect(self, frame):
-#         results = self.model(frame, verbose=False)
-
-#         found_types = set()
-#         person_count = 0
-
-#         for result in results:
-#             for box in result.boxes:
-#                 class_id = int(box.cls[0])
-#                 confidence = float(box.conf[0])
-#                 label = self.model.names[class_id].lower()
-
-#                 if label == "person":
-#                     person_count += 1
-#                     continue
-
-#                 if label in self.cheating_map:
-#                     cheating_type = self.cheating_map[label]
-#                     threshold = (
-#                         self.phone_threshold if "هاتف" in cheating_type else self.earphone_threshold
-#                     )
-#                     if confidence >= threshold:
-#                         found_types.add((cheating_type, label, confidence))
-
-#         # =========================
-#         # نظام التأكيد + cooldown لكل الغش
-#         # =========================
-#         confirmed_detections = []
-#         all_cheating_types = set(ct for ct, _, _ in found_types)
-
-#         for cheating_type, label, confidence in found_types:
-#             self.consecutive_count[cheating_type] += 1
-#             needed = self.confirm_frames_needed.get(cheating_type, 3)
-#             if self.consecutive_count[cheating_type] >= needed:
-#                 now = time.time()
-#                 last = self.last_reported.get(cheating_type, 0)
-#                 if now - last >= self.cooldown:
-#                     self.last_reported[cheating_type] = now
-#                     confirmed_detections.append({
-#                         "label": label,
-#                         "confidence": confidence,
-#                         "type_ar": cheating_type,
-#                         "cheating_type_id": self.cheating_type_ids.get(cheating_type, 0),
-#                     })
-
-#         # =========================
-#         # كشف وجود شخص آخر مع التأكيد
-#         # =========================
-#         if person_count > 1:
-#             self.consecutive_count["وجود شخص آخر"] += 1
-#             needed = self.confirm_frames_needed.get("وجود شخص آخر", 4)
-#             now = time.time()
-#             last = self.last_reported.get("وجود شخص آخر", 0)
-#             if self.consecutive_count["وجود شخص آخر"] >= needed and now - last >= self.cooldown:
-#                 self.last_reported["وجود شخص آخر"] = now
-#                 confirmed_detections.append({
-#                     "label": "multiple_persons",
-#                     "confidence": 1.0,
-#                     "type_ar": "وجود شخص آخر",
-#                     "cheating_type_id": self.cheating_type_ids.get("وجود شخص آخر", 2),
-#                 })
-#         else:
-#             self.consecutive_count["وجود شخص آخر"] = 0
-
-#         # إعادة التصفير لكل الغش غير المكتشف
-#         for cheating_type in list(self.consecutive_count.keys()):
-#             if cheating_type not in all_cheating_types and cheating_type != "وجود شخص آخر":
-#                 self.consecutive_count[cheating_type] = 0
-
-#         return confirmed_detections
-
-#     def detect_cheating(self, frame):
-#         return self.detect(frame)
-
-
-# # =========================
-# # تشغيل مستقل
-# # =========================
-# if __name__ == "__main__":
-#     # كاميرا الجهاز (0 = الكاميرا الافتراضية)
-#     detector = ObjectDetectionService()
-#     cap = cv2.VideoCapture(0)
-    
-#     if not cap.isOpened():
-#         print("❌ فشل فتح الكاميرا")
-#         exit()
-
-#     print("🎥 Camera started... Press ESC to exit")
-
-#     fps_counter = 0
-#     fps_start = time.time()
-#     fps_display = 0.0
-
-#     while True:
-#         ret, frame = cap.read()
-#         if not ret:
-#             print("❌ فشل قراءة الفريم")
-#             break
-
-#         fps_counter += 1
-#         elapsed = time.time() - fps_start
-#         if elapsed >= 1.0:
-#             fps_display = fps_counter / elapsed
-#             fps_counter = 0
-#             fps_start = time.time()
-
-#         detections = detector.detect_cheating(frame)
-
-#         if detections:
-#             print(f"✅ عدد الكشوفات: {len(detections)}")
-        
-#         for d in detections:
-#             print(f"🚨 {d['type_ar']} | {d['label']} | {d['confidence']:.2f}")
-#             cv2.putText(frame, d['type_ar'], (10, 50),
-#                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-#             # إصدار صوت تنبيه - بديل يعمل 100%
-#             print("🔊 محاولة إصدار الصوت...")
-#             try:
-#                 # استخدام MessageBeep بدلاً من Beep
-#                 winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-#                 print("✅ تم إصدار الصوت بنجاح")
-#             except Exception as e:
-#                 print(f"❌ فشل الصوت: {e}")
-
-#         cv2.putText(frame, f"FPS: {fps_display:.1f}", (10, frame.shape[0] - 10),
-#                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-#         cv2.imshow("Object Detection", frame)
-
-#         if cv2.waitKey(1) & 0xFF == 27:
-#             break
-
-#     cap.release()
-#     cv2.destroyAllWindows()
-
-
-
-
-
-
-
-# import cv2
-# from ultralytics import YOLO
-
-
-# class ObjectDetectionService:
-
-#     def __init__(self):
-#         self.model = YOLO("yolov8n.pt")
-#         self.confidence_threshold = 0.6
-          # يمكنك تعديل هذه القيمة
-
-        # الأشياء التي نعتبرها غش (العربي + الإنجليزي)
-    #     self.cheating_objects = {
-    #         "cell phone": {"ar": "استخدام الهاتف", "en": "Using Phone"},
-    #         "earphone": {"ar": "استخدام سماعات", "en": "Using Earphones"},
-    #         "headphones": {"ar": "استخدام سماعات", "en": "Using Headphones"}
-    #     }
-
-    # def detect_objects(self, frame):
-    #     results = self.model(frame, verbose=False)
-    #     detections = []
-    #     person_count = 0
-
-    #     for result in results:
-    #         for box in result.boxes:
-    #             class_id = int(box.cls[0])
-    #             confidence = float(box.conf[0])
-    #             label = self.model.names[class_id]
-
-    #             # عد الأشخاص فقط إذا كانت الثقة أعلى من العتبة
-    #             if label == "person" and confidence > self.confidence_threshold:
-    #                 person_count += 1
-
-    #             # اكتشاف أجسام الغش الأخرى (هاتف، سماعات) بشرط الثقة
-    #             if label in self.cheating_objects and confidence > self.confidence_threshold:
-    #                 detections.append({
-    #                     "label": label,
-    #                     "confidence": confidence,
-    #                     "ar": self.cheating_objects[label]["ar"],
-    #                     "en": self.cheating_objects[label]["en"]
-    #                 })
-
-    #     return detections, person_count
-
-    # def detect_cheating(self, frame):
-    #     detections, person_count = self.detect_objects(frame)
-    #     cheating_events = []
-
-        # إضافة الغش الآخر (الهاتف، السماعات...)
-        # for d in detections:
-        #     cheating_events.append({
-        #         "type_ar": d["ar"],
-        #         "type_en": d["en"],
-        #         "confidence": d["confidence"]
-        #     })
-
-        # # إذا كان هناك أكثر من شخص (بعد تطبيق شرط الثقة)
-        # if person_count > 1:
-        #     cheating_events.append({
-        #         "type_ar": "وجود شخص آخر",
-        #         "type_en": "Another Person Detected",
-        #         "confidence": 1.0
-        #     })
-
-        # return cheating_events
-
-
-# مثال تشغيل للاختبار فقط
-# if __name__ == "__main__":
-#     detector = ObjectDetectionService()
-#     cap = cv2.VideoCapture(0)
-
-#     while True:
-#         ret, frame = cap.read()
-#         if not ret:
-#             break
-
-#         cheating = detector.detect_cheating(frame)
-
-        # طباعة أحداث الغش إن وجدت
-    #     if cheating:
-    #         for c in cheating:
-    #             print(f"{c['type_ar']} | {c['type_en']} - Confidence: {c['confidence']:.2f}")
-
-    #     cv2.imshow("Camera", frame)
-
-    #     if cv2.waitKey(1) & 0xFF == 27:  # ESC للخروج
-    #         break
-
-    # cap.release()
-    # cv2.destroyAllWindows()
-    # ---------------------------------------
-# import cv2
-# from ultralytics import YOLOWorld  # 👈 استيراد مختلف
-
-# class ObjectDetectionService:
-#     def __init__(self):
-#         # تحميل نموذج YOLO-World (أصغر وأسرع نموذج)
-#         self.model = YOLOWorld("yolov8s-worldv2.pt")  # أو استخدم yolov8m-world.pt للأداء الأفضل
-#         self.confidence_threshold = 0.3  # ثقة أقل لأن السماعات صغيرة
-        
-#         # تحديد الكلمات التي نريد اكتشافها
-#         self.model.set_classes(["headphones", "earphone", "earbuds", "cell phone"])
-        
-#         # الأشياء التي نعتبرها غش
-#         self.cheating_objects = {
-#             "headphones": {"ar": "استخدام سماعات", "en": "Using Headphones"},
-#             "earphone": {"ar": "استخدام سماعات", "en": "Using Earphones"},
-#             "earbuds": {"ar": "استخدام سماعات", "en": "Using Earbuds"},
-#             "cell phone": {"ar": "استخدام الهاتف", "en": "Using Phone"}
-#         }
-
-#     def detect_objects(self, frame):
-#         results = self.model(frame, verbose=False)
-#         detections = []
-#         person_count = 0
-
-#         for result in results:
-#             for box in result.boxes:
-#                 class_id = int(box.cls[0])
-#                 confidence = float(box.conf[0])
-#                 label = self.model.names[class_id]  # الآن ستحصل على "headphones" وليس رقم
-
-#                 # عد الأشخاص (YOLO-World لايزال يتعرف على person)
-#                 if label == "person" and confidence > self.confidence_threshold:
-#                     person_count += 1
-
-#                 # اكتشاف أجسام الغش
-#                 if label in self.cheating_objects and confidence > self.confidence_threshold:
-#                     detections.append({
-#                         "label": label,
-#                         "confidence": confidence,
-#                         "ar": self.cheating_objects[label]["ar"],
-#                         "en": self.cheating_objects[label]["en"]
-#                     })
-
-#         return detections, person_count
-
-#     # باقي الدوال كما هي...
-#     def detect_cheating(self, frame):
-#         detections, person_count = self.detect_objects(frame)
-#         cheating_events = []
-
-#         for d in detections:
-#             cheating_events.append({
-#                 "type_ar": d["ar"],
-#                 "type_en": d["en"],
-#                 "confidence": d["confidence"]
-#             })
-
-#         if person_count > 1:
-#             cheating_events.append({
-#                 "type_ar": "وجود شخص آخر",
-#                 "type_en": "Another Person Detected",
-#                 "confidence": 1.0
-#             })
-
-#         return cheating_events
-
-# # نفس طريقة التشغيل السابقة
-# if __name__ == "__main__":
-#     detector = ObjectDetectionService()
-#     cap = cv2.VideoCapture(0)
-
-#     while True:
-#         ret, frame = cap.read()
-#         if not ret:
-#             break
-
-#         cheating = detector.detect_cheating(frame)
-
-#         if cheating:
-#             for c in cheating:
-#                 print(f"{c['type_ar']} | {c['type_en']} - Confidence: {c['confidence']:.2f}")
-
-#         cv2.imshow("Camera", frame)
-#         if cv2.waitKey(1) & 0xFF == 27:
-#             break
-
-#     cap.release()
-#     cv2.destroyAllWindows()
-# app/services/object_detection.py
-
-# class ObjectDetectionService:
-#     def __init__(self):
-#         pass
-
-#     def detect_objects(self, frame):
-#         # مؤقتاً، لا شيء يرجع دائماً قائمة فارغة وعدد أشخاص صفر
-#         return [], 0
-
-#     def detect_cheating(self, frame):
-#         # مؤقتاً، لا يوجد أي غش
-#         return []
-# ------------------------------------
-# import cv2
-# from ultralytics import YOLOWorld
-
-
-# class ObjectDetectionService:
-#     def __init__(self):
-#         print("⏳ Loading YOLO-World model...")
-#         self.model = YOLOWorld("yolov8s-worldv2.pt")
-
-#         # threshold منخفض للسماعات الصغيرة
-#         self.confidence_threshold = 0.25
-
-#         # كل التسميات الممكنة للسماعات — YOLO-World يفهم النص
-#         self.earphone_aliases = [
-#             "earphone",
-#             "earphones",
-#             "earbuds",
-#             "earbud",
-#             "headphones",
-#             "headphone",
-#             "wireless earbuds",
-#             "in-ear headphones",
-#             "airpods",
-#             "hearing device",
-#         ]
-
-#         # الكلاسات الكاملة
-#         all_classes = self.earphone_aliases + ["cell phone", "person", "mobile phone", "smartphone"]
-#         self.model.set_classes(all_classes)
-
-#         # تعريف الغش — أي تسمية سماعة تُعامل كغش
-#         self.cheating_map = {alias: "استخدام سماعات" for alias in self.earphone_aliases}
-#         self.cheating_map["cell phone"] = "استخدام الهاتف"
-#         self.cheating_map["mobile phone"] = "استخدام الهاتف"
-#         self.cheating_map["smartphone"] = "استخدام الهاتف"
-
-#         # cheating_type_id لكل نوع
-#         self.cheating_type_ids = {
-#             "استخدام سماعات": 2,
-#             "استخدام الهاتف": 1,
-#             "وجود أكثر من شخص": 3,
-#         }
-
-#         # منع تكرار نفس الكشف خلال ثواني
-#         self.last_detected = {}
-#         self.detection_cooldown = 3  # ثواني
-
-#         print("✅ Model loaded successfully")
-
-#     # =========================
-#     # الكشف الرئيسي
-#     # =========================
-#     def detect(self, frame):
-#         results = self.model(frame, verbose=False)
-#         detections = []
-#         person_count = 0
-
-#         for result in results:
-#             for box in result.boxes:
-#                 class_id = int(box.cls[0])
-#                 confidence = float(box.conf[0])
-#                 label = self.model.names[class_id].lower()
-
-#                 # threshold مخصص للسماعات أقل من الهاتف
-#                 threshold = 0.20 if label in self.earphone_aliases else self.confidence_threshold
-#                 if confidence < threshold:
-#                     continue
-
-#                 x1, y1, x2, y2 = map(int, box.xyxy[0])
-
-#                 if label == "person":
-#                     person_count += 1
-#                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-#                     cv2.putText(frame, f"person {confidence:.2f}",
-#                                 (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-#                     continue
-
-#                 if label in self.cheating_map:
-#                     cheating_type = self.cheating_map[label]
-#                     # رسم المستطيل
-#                     color = (0, 0, 255) if "هاتف" in cheating_type else (255, 0, 0)
-#                     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-#                     cv2.putText(frame, f"{label} {confidence:.2f}",
-#                                 (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-#                     detections.append({
-#                         "label": label,
-#                         "confidence": confidence,
-#                         "type_ar": cheating_type,
-#                         "cheating_type_id": self.cheating_type_ids.get(cheating_type, 0),
-#                         "bbox": (x1, y1, x2, y2),
-#                     })
-
-#         # كشف أكثر من شخص
-#         if person_count > 1:
-#             detections.append({
-#                 "label": "multiple_persons",
-#                 "confidence": 1.0,
-#                 "type_ar": "وجود أكثر من شخص",
-#                 "cheating_type_id": self.cheating_type_ids["وجود أكثر من شخص"],
-#                 "bbox": None,
-#             })
-
-#         return frame, detections, person_count
-
-#     # =========================
-#     # للاستخدام من VideoMonitoringService
-#     # =========================
-#     def detect_cheating(self, frame):
-#         frame, detections, person_count = self.detect(frame)
-#         return detections
-
-#     # =========================
-#     # تشغيل مستقل للاختبار
-#     # =========================
-
-
-# if __name__ == "__main__":
-#     import time
-
-#     detector = ObjectDetectionService()
-#     cap = cv2.VideoCapture(0)
-
-#     if not cap.isOpened():
-#         print("❌ Cannot open camera")
-#         exit()
-
-#     print("🎥 Camera started... Press ESC to exit")
-#     last_print = 0
-
-#     while True:
-#         ret, frame = cap.read()
-#         if not ret:
-#             break
-
-#         frame, detections, person_count = detector.detect(frame)
-
-#         now = time.time()
-#         if detections and now - last_print > 1:
-#             print("\n🚨 Cheating Detected:")
-#             for d in detections:
-#                 print(f"  {d['type_ar']} | {d['label']} | confidence: {d['confidence']:.2f}")
-#             last_print = now
-
-#         if person_count > 1:
-#             cv2.putText(frame, "⚠ Multiple Persons!", (20, 120),
-#                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
-
-#         cv2.imshow("Detection Test", frame)
-#         if cv2.waitKey(1) & 0xFF == 27:
-#             break
-
-#     cap.release()
-#     cv2.destroyAllWindows()
-# ------------------------------------  الصح حاليا كاميرا الخارجيه
-# import cv2
-# import time
-# from collections import defaultdict
-# from ultralytics import YOLOWorld
-# import threading
-
-# # =========================
-# # 🔹 Threaded Video Capture لتجنب تعليق الفيديو
-# class VideoStream:
-#     def __init__(self, url):
-#         self.cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-#         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-#         self.ret, self.frame = self.cap.read()
-#         self.running = True
-#         self.thread = threading.Thread(target=self.update, daemon=True)
-#         self.thread.start()
-
-#     def update(self):
-#         while self.running:
-#             ret, frame = self.cap.read()
-#             if ret:
-#                 self.ret = ret
-#                 self.frame = frame
-
-#     def read(self):
-#         return self.ret, self.frame
-
-#     def stop(self):
-#         self.running = False
-#         self.thread.join()
-#         self.cap.release()
-
-
-# # =========================
-# # 🔹 كشف الغش باستخدام YOLO-World
-# class ObjectDetectionService:
-#     def __init__(self):
-#         print("⏳ Loading YOLO-World model...")
-#         self.model = YOLOWorld("yolov8s-worldv2.pt")
-
-#         self.earphone_aliases = [
-#             "earphone", "earphones", "earbuds", "earbud",
-#             "headphones", "headphone", "wireless earbuds",
-#             "in-ear headphones", "airpods",
-#         ]
-
-#         all_classes = self.earphone_aliases + [
-#             "cell phone", "person", "mobile phone", "smartphone"
-#         ]
-#         self.model.set_classes(all_classes)
-
-#         self.cheating_map = {alias: "استخدام سماعات" for alias in self.earphone_aliases}
-#         self.cheating_map["cell phone"] = "استخدام الهاتف"
-#         self.cheating_map["mobile phone"] = "استخدام الهاتف"
-#         self.cheating_map["smartphone"] = "استخدام الهاتف"
-
-#         self.cheating_type_ids = {
-#             "استخدام الهاتف": 1,
-#             "استخدام سماعات": 3,
-#             "وجود شخص آخر": 2,
-#         }
-
-#         self.phone_threshold = 0.35
-#         self.earphone_threshold = 0.30
-
-#         self.confirm_frames_needed = {
-#             "استخدام الهاتف": 1,
-#             "استخدام سماعات": 2,
-#             "وجود شخص آخر": 4,
-#         }
-
-#         self.consecutive_count = defaultdict(int)
-#         self.cooldown = 8
-#         self.last_reported = {}
-
-#         print("✅ Model loaded successfully")
-
-#     # =========================
-#     # الكشف الأساسي
-#     # =========================
-#     def detect(self, frame):
-#         results = self.model(frame, verbose=False)
-
-#         found_types = set()
-#         person_count = 0
-
-#         for result in results:
-#             for box in result.boxes:
-#                 class_id = int(box.cls[0])
-#                 confidence = float(box.conf[0])
-#                 label = self.model.names[class_id].lower()
-
-#                 if label == "person":
-#                     person_count += 1
-#                     continue
-
-#                 if label in self.cheating_map:
-#                     cheating_type = self.cheating_map[label]
-#                     threshold = (
-#                         self.phone_threshold if "هاتف" in cheating_type else self.earphone_threshold
-#                     )
-#                     if confidence >= threshold:
-#                         found_types.add((cheating_type, label, confidence))
-
-#         # =========================
-#         # نظام التأكيد + cooldown لكل الغش
-#         # =========================
-#         confirmed_detections = []
-#         all_cheating_types = set(ct for ct, _, _ in found_types)
-
-#         for cheating_type, label, confidence in found_types:
-#             self.consecutive_count[cheating_type] += 1
-#             needed = self.confirm_frames_needed.get(cheating_type, 3)
-#             if self.consecutive_count[cheating_type] >= needed:
-#                 now = time.time()
-#                 last = self.last_reported.get(cheating_type, 0)
-#                 if now - last >= self.cooldown:
-#                     self.last_reported[cheating_type] = now
-#                     confirmed_detections.append({
-#                         "label": label,
-#                         "confidence": confidence,
-#                         "type_ar": cheating_type,
-#                         "cheating_type_id": self.cheating_type_ids.get(cheating_type, 0),
-#                     })
-
-#         # =========================
-#         # كشف وجود شخص آخر مع التأكيد
-#         # =========================
-#         if person_count > 1:
-#             self.consecutive_count["وجود شخص آخر"] += 1
-#             needed = self.confirm_frames_needed.get("وجود شخص آخر", 4)
-#             now = time.time()
-#             last = self.last_reported.get("وجود شخص آخر", 0)
-#             if self.consecutive_count["وجود شخص آخر"] >= needed and now - last >= self.cooldown:
-#                 self.last_reported["وجود شخص آخر"] = now
-#                 confirmed_detections.append({
-#                     "label": "multiple_persons",
-#                     "confidence": 1.0,
-#                     "type_ar": "وجود شخص آخر",
-#                     "cheating_type_id": self.cheating_type_ids.get("وجود شخص آخر", 2),
-#                 })
-#         else:
-#             self.consecutive_count["وجود شخص آخر"] = 0
-
-#         # إعادة التصفير لكل الغش غير المكتشف
-#         for cheating_type in list(self.consecutive_count.keys()):
-#             if cheating_type not in all_cheating_types and cheating_type != "وجود شخص آخر":
-#                 self.consecutive_count[cheating_type] = 0
-
-#         return confirmed_detections
-
-#     def detect_cheating(self, frame):
-#         return self.detect(frame)
-
-
-# # =========================
-# # تشغيل مستقل
-# # =========================
-# if __name__ == "__main__":
-#     url = "rtsp://admin:TVSHZW@192.168.137.110:554/Streaming/Channels/101"
-#     stream = VideoStream(url)
-#     time.sleep(2)
-
-#     detector = ObjectDetectionService()
-
-#     print("🎥 Camera started... Press ESC to exit")
-
-#     while True:
-#         ret, frame = stream.read()
-#         if not ret or frame is None:
-#             continue
-
-#         frame = cv2.resize(frame, (480, 360))
-
-#         detections = detector.detect_cheating(frame)
-
-#         for d in detections:
-#             print(f"🚨 {d['type_ar']} | {d['label']} | {d['confidence']:.2f}")
-
-#         cv2.imshow("Head Pose Camera", frame)
-
-#         if cv2.waitKey(1) & 0xFF == 27:
-#             break
-
-#     stream.stop()
-#     cv2.destroyAllWindows()
-# -------
 import cv2
 import time
+import numpy as np
 from collections import defaultdict
 from ultralytics import YOLOWorld
+import insightface
 
 
 class ObjectDetectionService:
@@ -790,30 +33,83 @@ class ObjectDetectionService:
         self.cheating_map["smartphone"] = "استخدام الهاتف"
 
         self.cheating_type_ids = {
-            "استخدام الهاتف": 1,#4
-            "استخدام سماعات": 3,#3
-            "وجود شخص آخر": 2,#2
+            "استخدام الهاتف": 1,
+            "استخدام سماعات": 3,
         }
-        
 
-        self.phone_threshold = 0.15  #很低 للكشف حتى الجزء الصغير
-        self.earphone_threshold = 0.20  # أقل للسماعات أيضاً
+        self.phone_threshold = 0.15
+        self.earphone_threshold = 0.20
 
         # كشف فوري - فريم واحد فقط
         self.confirm_frames_needed = {
-            "استخدام الهاتف": 1,  # فوري - فريم واحد فقط!
-            "استخدام سماعات": 1,  # فوري أيضاً
-            "وجود شخص آخر": 1,  # فوري للشخص الثاني
+            "استخدام الهاتف": 1,
+            "استخدام سماعات": 1,
         }
 
         self.consecutive_count = defaultdict(int)
 
-        self.cooldown = 5  # cooldown عام
-        self.phone_cooldown = 2  # cooldown للهاتف - سريع
-        self.person_cooldown = 2  # cooldown للشخص الثاني - سريع
+        self.cooldown = 5
+        self.phone_cooldown = 2
+        self.person_cooldown = 2
         self.last_reported = {}
 
+        # ✅ تحميل موديل التعرف على الوجه
+        print("⏳ Loading Face model for object detection...")
+        self.face_app = insightface.app.FaceAnalysis(name="buffalo_l")
+        self.face_app.prepare(ctx_id=-1, det_size=(320, 320))
+        print("✅ Face model loaded")
+
         print("✅ Model loaded successfully")
+
+    # =========================
+    # ✅ دالة مساعدة: استخراج الوجوه مع مواقعها
+    # =========================
+    def _get_faces_with_positions(self, frame):
+        """استخراج الوجوه مع مواقعها في الفريم"""
+        try:
+            faces = self.face_app.get(frame)
+            result = []
+            for f in faces:
+                x1, y1, x2, y2 = f.bbox
+                center_x = (x1 + x2) / 2
+                center_y = (y1 + y2) / 2
+                result.append({
+                    "embedding": f.embedding.astype(np.float32).tobytes(),
+                    "center_x": center_x,
+                    "center_y": center_y,
+                    "bbox": (x1, y1, x2, y2)
+                })
+            return result
+        except Exception as e:
+            print(f"⚠️ خطأ في استخراج الوجوه: {e}")
+            return []
+
+    # =========================
+    # ✅ دالة مساعدة: إيجاد أقرب وجه لموقع الهاتف/السماعة
+    # =========================
+    def _get_nearest_face_embedding(self, faces, object_box):
+        """يرجع embedding الوجه الأقرب مكانياً للكائن (هاتف/سماعة)"""
+        if not faces:
+            return None
+
+        ox1, oy1, ox2, oy2 = object_box
+        obj_cx = (ox1 + ox2) / 2
+        obj_cy = (oy1 + oy2) / 2
+
+        best_face = None
+        best_dist = float("inf")
+
+        for face in faces:
+            dist = ((face["center_x"] - obj_cx) ** 2 + (face["center_y"] - obj_cy) ** 2) ** 0.5
+            if dist < best_dist:
+                best_dist = dist
+                best_face = face
+
+        if best_face:
+            print(f"🎯 أقرب وجه للكائن: مسافة {best_dist:.1f}px")
+            return best_face["embedding"]
+
+        return None
 
     # =========================
     # الكشف الأساسي
@@ -828,10 +124,11 @@ class ObjectDetectionService:
             frame_resized = cv2.resize(frame, (new_width, new_height))
         else:
             frame_resized = frame
-            
+
         results = self.model(frame_resized, verbose=False, imgsz=640)
 
-        found_types = set()
+        # cheating_type -> (label, confidence, box)
+        found_types = {}
         person_detections = []
 
         for result in results:
@@ -840,9 +137,7 @@ class ObjectDetectionService:
                 confidence = float(box.conf[0])
                 label = self.model.names[class_id].lower()
 
-                # جمع معلومات الأشخاص
                 if label == "person":
-                    # فقط الأشخاص بثقة عالية
                     if confidence > 0.5:
                         x1, y1, x2, y2 = box.xyxy[0].tolist()
                         area = (x2 - x1) * (y2 - y1)
@@ -853,7 +148,6 @@ class ObjectDetectionService:
                         })
                     continue
 
-                # كشف الغش
                 if label in self.cheating_map:
                     cheating_type = self.cheating_map[label]
 
@@ -866,43 +160,35 @@ class ObjectDetectionService:
                     if confidence < threshold:
                         continue
 
-                    found_types.add((cheating_type, label, confidence))
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    # احتفظ بأعلى confidence لكل نوع مع موقعه
+                    if cheating_type not in found_types or confidence > found_types[cheating_type][1]:
+                        found_types[cheating_type] = (label, confidence, (x1, y1, x2, y2))
 
-        # فلترة الأشخاص - إزالة الكشوفات الصغيرة والضعيفة
+        # فلترة الأشخاص
         if len(person_detections) > 1:
-            # ترتيب حسب المساحة (الأكبر أولاً)
             person_detections.sort(key=lambda x: x['area'], reverse=True)
-            
-            # الشخص الرئيسي (الأكبر)
             main_person = person_detections[0]
-            
-            # فحص الأشخاص الآخرين
             real_persons = 1
             for person in person_detections[1:]:
-                # إذا كان الشخص الآخر كبير بما يكفي (أكثر من 30% من الرئيسي)
-                # وثقة عالية (أكثر من 0.65)
                 if person['area'] > main_person['area'] * 0.3 and person['confidence'] > 0.65:
                     real_persons += 1
-            
-            # فقط إذا كان هناك شخصان حقيقيان
-            if real_persons > 1:
-                found_types.add(("وجود شخص آخر", "multiple_persons", 1.0))
 
-        # =========================
         # نظام التأكيد + cooldown
-        # =========================
         confirmed_detections = []
-        all_cheating_types = set(ct for ct, _, _ in found_types)
+        all_cheating_types = set(found_types.keys())
 
-        for cheating_type, label, confidence in found_types:
+        # ✅ استخراج الوجوه مع مواقعها مرة واحدة فقط
+        faces_with_positions = self._get_faces_with_positions(frame_resized)
+
+        for cheating_type, (label, confidence, obj_box) in found_types.items():
             self.consecutive_count[cheating_type] += 1
             needed = self.confirm_frames_needed.get(cheating_type, 3)
 
             if self.consecutive_count[cheating_type] >= needed:
                 now = time.time()
                 last = self.last_reported.get(cheating_type, 0)
-                
-                # استخدام cooldown مختلف حسب النوع
+
                 if "هاتف" in cheating_type:
                     cooldown_time = self.phone_cooldown
                 elif "شخص" in cheating_type:
@@ -913,12 +199,19 @@ class ObjectDetectionService:
                 if now - last >= cooldown_time:
                     self.last_reported[cheating_type] = now
 
-                    confirmed_detections.append({
+                    detection = {
                         "label": label,
                         "confidence": confidence,
                         "type_ar": cheating_type,
                         "cheating_type_id": self.cheating_type_ids.get(cheating_type, 0),
-                    })
+                    }
+
+                    # ✅ أقرب وجه لموقع الكائن
+                    nearest_emb = self._get_nearest_face_embedding(faces_with_positions, obj_box)
+                    if nearest_emb:
+                        detection["face_embedding"] = nearest_emb
+
+                    confirmed_detections.append(detection)
 
         # إعادة التصفير
         for cheating_type in list(self.consecutive_count.keys()):
@@ -938,38 +231,50 @@ class ObjectDetectionService:
     # =========================
     def detect_phone_only(self, frame):
         """كشف الهاتف بشكل منفصل وأسرع"""
-        # تصغير الفريم
         height, width = frame.shape[:2]
         if width > 640:
             scale = 640 / width
             frame_resized = cv2.resize(frame, (640, int(height * scale)))
         else:
             frame_resized = frame
-            
+
         results = self.model(frame_resized, verbose=False, imgsz=640)
-        
+
         phone_labels = ["cell phone", "mobile phone", "smartphone"]
-        
+
         for result in results:
             for box in result.boxes:
                 class_id = int(box.cls[0])
                 confidence = float(box.conf[0])
                 label = self.model.names[class_id].lower()
-                
-                if label in phone_labels and confidence > 0.15:  #很低 threshold
-                    # فحص cooldown
+
+                if label in phone_labels and confidence > 0.15:
                     now = time.time()
                     last = self.last_reported.get("استخدام الهاتف", 0)
-                    
+
                     if now - last >= self.phone_cooldown:
                         self.last_reported["استخدام الهاتف"] = now
-                        return [{
+
+                        # ✅ موقع الهاتف
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        phone_box = (x1, y1, x2, y2)
+
+                        # ✅ أقرب وجه لموقع الهاتف = الطالب الذي يمسكه
+                        faces = self._get_faces_with_positions(frame_resized)
+                        nearest_emb = self._get_nearest_face_embedding(faces, phone_box)
+
+                        detection = {
                             "label": label,
                             "confidence": confidence,
                             "type_ar": "استخدام الهاتف",
                             "cheating_type_id": self.cheating_type_ids.get("استخدام الهاتف", 0),
-                        }]
-        
+                        }
+
+                        if nearest_emb:
+                            detection["face_embedding"] = nearest_emb
+
+                        return [detection]
+
         return []
 
     # =========================
@@ -1006,6 +311,257 @@ if __name__ == "__main__":
 
     cap.release()
     cv2.destroyAllWindows()
+# -------
+# هذا حق الهاتف وجود شخص اخر 
+# import cv2
+# import time
+# from collections import defaultdict
+# from ultralytics import YOLOWorld
+
+
+# class ObjectDetectionService:
+#     def __init__(self):
+#         print("⏳ Loading YOLO-World model...")
+#         self.model = YOLOWorld("yolov8s-worldv2.pt")
+        
+#         # تحسينات الأداء
+#         self.model.overrides['conf'] = 0.25  # threshold أعلى
+#         self.model.overrides['iou'] = 0.45
+#         self.model.overrides['half'] = False  # FP16 للسرعة (إذا كان GPU متاح)
+
+#         self.earphone_aliases = [
+#             "earphone", "earphones", "earbuds", "earbud",
+#             "headphones", "headphone", "wireless earbuds",
+#             "in-ear headphones", "airpods",
+#         ]
+
+#         all_classes = self.earphone_aliases + [
+#             "cell phone", "person", "mobile phone", "smartphone"
+#         ]
+#         self.model.set_classes(all_classes)
+
+#         self.cheating_map = {alias: "استخدام سماعات" for alias in self.earphone_aliases}
+#         self.cheating_map["cell phone"] = "استخدام الهاتف"
+#         self.cheating_map["mobile phone"] = "استخدام الهاتف"
+#         self.cheating_map["smartphone"] = "استخدام الهاتف"
+
+#         self.cheating_type_ids = {
+#             "استخدام الهاتف": 1,#4
+#             "استخدام سماعات": 3,#3
+#             "وجود شخص آخر": 2,#2
+#         }
+        
+
+#         self.phone_threshold = 0.15  #很低 للكشف حتى الجزء الصغير
+#         self.earphone_threshold = 0.20  # أقل للسماعات أيضاً
+
+#         # كشف فوري - فريم واحد فقط
+#         self.confirm_frames_needed = {
+#             "استخدام الهاتف": 1,  # فوري - فريم واحد فقط!
+#             "استخدام سماعات": 1,  # فوري أيضاً
+#             "وجود شخص آخر": 1,  # فوري للشخص الثاني
+#         }
+
+#         self.consecutive_count = defaultdict(int)
+
+#         self.cooldown = 5  # cooldown عام
+#         self.phone_cooldown = 2  # cooldown للهاتف - سريع
+#         self.person_cooldown = 1  # cooldown للشخص الثاني - سريع
+#         self.last_reported = {}
+
+#         print("✅ Model loaded successfully")
+
+#     # =========================
+#     # الكشف الأساسي
+#     # =========================
+#     def detect(self, frame):
+#         # تصغير الفريم لتسريع المعالجة
+#         height, width = frame.shape[:2]
+#         if width > 640:
+#             scale = 640 / width
+#             new_width = 640
+#             new_height = int(height * scale)
+#             frame_resized = cv2.resize(frame, (new_width, new_height))
+#         else:
+#             frame_resized = frame
+            
+#         results = self.model(frame_resized, verbose=False, imgsz=640)
+
+#         found_types = set()
+#         person_detections = []
+
+#         for result in results:
+#             for box in result.boxes:
+#                 class_id = int(box.cls[0])
+#                 confidence = float(box.conf[0])
+#                 label = self.model.names[class_id].lower()
+
+#                 # جمع معلومات الأشخاص
+#                 if label == "person":
+#                     # فقط الأشخاص بثقة عالية
+#                     if confidence > 0.5:
+#                         x1, y1, x2, y2 = box.xyxy[0].tolist()
+#                         area = (x2 - x1) * (y2 - y1)
+#                         person_detections.append({
+#                             'confidence': confidence,
+#                             'area': area,
+#                             'box': (x1, y1, x2, y2)
+#                         })
+#                     continue
+
+#                 # كشف الغش
+#                 if label in self.cheating_map:
+#                     cheating_type = self.cheating_map[label]
+
+#                     threshold = (
+#                         self.phone_threshold
+#                         if "هاتف" in cheating_type
+#                         else self.earphone_threshold
+#                     )
+
+#                     if confidence < threshold:
+#                         continue
+
+#                     found_types.add((cheating_type, label, confidence))
+
+#         # فلترة الأشخاص - إزالة الكشوفات الصغيرة والضعيفة
+#         if len(person_detections) > 1:
+#             # ترتيب حسب المساحة (الأكبر أولاً)
+#             person_detections.sort(key=lambda x: x['area'], reverse=True)
+            
+#             # الشخص الرئيسي (الأكبر)
+#             main_person = person_detections[0]
+            
+#             # فحص الأشخاص الآخرين
+#             real_persons = 1
+#             for person in person_detections[1:]:
+#                 # إذا كان الشخص الآخر كبير بما يكفي (أكثر من 30% من الرئيسي)
+#                 # وثقة عالية (أكثر من 0.65)
+#                 if person['area'] > main_person['area'] * 0.3 and person['confidence'] > 0.65:
+#                     real_persons += 1
+            
+#             # فقط إذا كان هناك شخصان حقيقيان
+#             if real_persons > 1:
+#                 found_types.add(("وجود شخص آخر", "multiple_persons", 1.0))
+
+#         # =========================
+#         # نظام التأكيد + cooldown
+#         # =========================
+#         confirmed_detections = []
+#         all_cheating_types = set(ct for ct, _, _ in found_types)
+
+#         for cheating_type, label, confidence in found_types:
+#             self.consecutive_count[cheating_type] += 1
+#             needed = self.confirm_frames_needed.get(cheating_type, 3)
+
+#             if self.consecutive_count[cheating_type] >= needed:
+#                 now = time.time()
+#                 last = self.last_reported.get(cheating_type, 0)
+                
+#                 # استخدام cooldown مختلف حسب النوع
+#                 if "هاتف" in cheating_type:
+#                     cooldown_time = self.phone_cooldown
+#                 elif "شخص" in cheating_type:
+#                     cooldown_time = self.person_cooldown
+#                 else:
+#                     cooldown_time = self.cooldown
+
+#                 if now - last >= cooldown_time:
+#                     self.last_reported[cheating_type] = now
+
+#                     confirmed_detections.append({
+#                         "label": label,
+#                         "confidence": confidence,
+#                         "type_ar": cheating_type,
+#                         "cheating_type_id": self.cheating_type_ids.get(cheating_type, 0),
+#                     })
+
+#         # إعادة التصفير
+#         for cheating_type in list(self.consecutive_count.keys()):
+#             if cheating_type not in all_cheating_types:
+#                 self.consecutive_count[cheating_type] = 0
+
+#         return confirmed_detections
+
+#     # =========================
+#     # هذه هي المهمة (مطلوبة من video_service)
+#     # =========================
+#     def detect_cheating(self, frame):
+#         return self.detect(frame)
+
+#     # =========================
+#     # كشف الهاتف فقط - سريع جداً
+#     # =========================
+#     def detect_phone_only(self, frame):
+#         """كشف الهاتف بشكل منفصل وأسرع"""
+#         # تصغير الفريم
+#         height, width = frame.shape[:2]
+#         if width > 640:
+#             scale = 640 / width
+#             frame_resized = cv2.resize(frame, (640, int(height * scale)))
+#         else:
+#             frame_resized = frame
+            
+#         results = self.model(frame_resized, verbose=False, imgsz=640)
+        
+#         phone_labels = ["cell phone", "mobile phone", "smartphone"]
+        
+#         for result in results:
+#             for box in result.boxes:
+#                 class_id = int(box.cls[0])
+#                 confidence = float(box.conf[0])
+#                 label = self.model.names[class_id].lower()
+                
+#                 if label in phone_labels and confidence > 0.15:  #很低 threshold
+#                     # فحص cooldown
+#                     now = time.time()
+#                     last = self.last_reported.get("استخدام الهاتف", 0)
+                    
+#                     if now - last >= self.phone_cooldown:
+#                         self.last_reported["استخدام الهاتف"] = now
+#                         return [{
+#                             "label": label,
+#                             "confidence": confidence,
+#                             "type_ar": "استخدام الهاتف",
+#                             "cheating_type_id": self.cheating_type_ids.get("استخدام الهاتف", 0),
+#                         }]
+        
+#         return []
+
+#     # =========================
+#     # كشف الأشياء الأخرى (سماعات + شخص)
+#     # =========================
+#     def detect_other_cheating(self, frame):
+#         """كشف السماعات والشخص بشكل منفصل"""
+#         return self.detect(frame)
+
+
+# # =========================
+# # تشغيل للاختبار فقط
+# # =========================
+# if __name__ == "__main__":
+#     detector = ObjectDetectionService()
+#     cap = cv2.VideoCapture(0)
+
+#     print("🎥 Camera started...")
+
+#     while True:
+#         ret, frame = cap.read()
+#         if not ret:
+#             break
+
+#         detections = detector.detect_cheating(frame)
+
+#         for d in detections:
+#             print(f"🚨 {d['type_ar']} | {d['label']} | {d['confidence']:.2f}")
+
+#         cv2.imshow("Test", frame)
+
+#         if cv2.waitKey(1) & 0xFF == 27:
+#             break
+
+#     cap.release()
+#     cv2.destroyAllWindows()
     
         
     

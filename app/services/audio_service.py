@@ -9,19 +9,17 @@ class AudioService:
     def __init__(self):
 
         self.sample_rate = 44100
-        # self.sample_rate = 16000
-        self.duration = 0.08  # تقليل من 1 إلى 0.5 ثانية
-        self.noise_threshold = 0.08
+        # self.duration =0.008  # تقليل من 1 إلى 0.5 ثانية
+        self.duration =8  # تقليل من 1 إلى 0.5 ثانية
+        # self.noise_threshold = 0.01
+        self.noise_threshold = 5
 
         self.running = False
         self.last_event = None
         self.thread = None
         
         # تحسين الأداء
-        self.check_interval = 0.2  # فحص كل 0.3 ثانية بدلاً من 0.2
-        
-        # تجاهل صوت الإنذار
-        self.ignore_until = 0  # وقت حتى يتم تجاهل الصوت
+        self.check_interval = 0.3  # فحص كل 0.3 ثانية بدلاً من 0.2
 
 
     def start(self):
@@ -57,12 +55,6 @@ class AudioService:
                 )
 
                 sd.wait()
-
-                # تجاهل صوت الإنذار
-                current_time = time.time()
-                if current_time < self.ignore_until:
-                    time.sleep(self.check_interval)
-                    continue
 
                 volume = np.linalg.norm(recording) / len(recording)
 

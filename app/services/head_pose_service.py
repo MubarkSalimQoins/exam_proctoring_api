@@ -1,391 +1,266 @@
-# class HeadPoseService:
-#     def __init__(self):
-#         pass
-
-#     def detect_head_pose(self, frame):  # <-- غيرت الاسم هنا
-#         # مؤقتاً نرجع False
-#         return False
-# ---------------------------------------------------
-# هذا الكود الصح
-# import cv2
-# import numpy as np
-# import insightface
+import cv2
+import numpy as np
+import time
+import insightface
+from collections import defaultdict
+import winsound
 
 
-# class HeadPoseService:
+class HeadPoseService:
 
-#     def __init__(self):
+    def __init__(self):
 
-#         # تحميل موديل الوجه
-#         self.app = insightface.app.FaceAnalysis(name="buffalo_l")
-#         self.app.prepare(ctx_id=-1)
+        # 🔹 تحميل موديل الوجه
+        self.app = insightface.app.FaceAnalysis(name="buffalo_l")
+        self.app.prepare(ctx_id=-1, det_size=(320, 320))
 
-#         # حدود الحركة
-#         self.yaw_threshold = 30
-#         self.pitch_threshold = 25
+        # 🔹 حدود الحركة
+        self.yaw_threshold = 30
+        self.pitch_threshold = 25
 
-#     def detect_head_pose(self, frame):
+        # ⏱️ الوقت بالثواني لتحديد الغش
+        self.required_seconds = {
+            "look_away": 0.5,
+            "head_movement": 0.3,
+            "no_face": 1
+        }
 
-#         try:
+        self.start_time = defaultdict(lambda: None)
 
-#             faces = self.app.get(frame)
+        # ⛔ منع التكرار
+        self.cooldown = 5
+        self.last_reported = {}
 
-#             # إذا لم يوجد وجه
-#             if len(faces) == 0:
+        # ✅ تتبع الطلاب المتوقعين
+        self.expected_students = []
+        self.student_absent_since = {}
 
-#                 return {
-#                     "cheating_type_id": 7,
-#                     "type_ar": "محاولة مغادرة الكاميرا",
-#                     "type_en": "Leaving Camera",
-#                     "confidence": 0.9
-#                 }
+        print("✅ HeadPose model loaded")
 
-#             face = faces[0]
+    # =========================
+    # 🔊 إصدار صوت تنبيه
+    # =========================
+    def play_alert(self):
+        try:
+            winsound.Beep(1000, 300)
+            print("🔊 Sound triggered")
+        except:
+            pass
 
-#             # زوايا الرأس
-#             yaw = face.pose[0]
-#             pitch = face.pose[1]
-#             roll = face.pose[2]
+    # =========================
+    # ✅ تعيين الطلاب المتوقعين من video_service
+    # =========================
+    def set_expected_students(self, students):
+        self.expected_students = students
+        self.student_absent_since = {}
+        print(f"✅ HeadPose: تم تعيين {len(students)} طلاب متوقعين")
 
-#             # النظر بعيد عن الشاشة
-#             if abs(yaw) > self.yaw_threshold:
+    # =========================
+    # ✅ مطابقة وجه مع قائمة الطلاب
+    # =========================
+    def _match_face_to_student(self, face_embedding):
+        if not self.expected_students:
+            return None
 
-#                 return {
-#                     "cheating_type_id": 4,
-#                     "type_ar": "النظر بعيداً عن الشاشة",
-#                     "type_en": "Looking Away",
-#                     "confidence": abs(yaw) / 90
-#                 }
+        emb = face_embedding.astype(np.float32)
+        emb = emb / (np.linalg.norm(emb) + 1e-8)
 
-#             # حركة رأس غير طبيعية
-#             if abs(pitch) > self.pitch_threshold:
+        best_sim = 0.5
+        best_student = None
 
-#                 return {
-#                     "cheating_type_id": 5,
-#                     "type_ar": "حركة رأس غير طبيعية",
-#                     "type_en": "Abnormal Head Movement",
-#                     "confidence": abs(pitch) / 90
-#                 }
+        for student in self.expected_students:
+            if not student.get("embedding"):
+                continue
+            stored = np.frombuffer(student["embedding"], dtype=np.float32)
+            stored = stored / (np.linalg.norm(stored) + 1e-8)
+            sim = float(np.dot(emb, stored))
+            if sim > best_sim:
+                best_sim = sim
+                best_student = student
 
-#             return None
+        return best_student
 
-#         except Exception as e:
+    # =========================
+    # كشف حالات الغش
+    # =========================
+    def detect_head_pose(self, frame):
+        try:
+            # تصغير الفريم لتسريع المعالجة
+            height, width = frame.shape[:2]
+            if width > 640:
+                scale = 640 / width
+                new_width = 640
+                new_height = int(height * scale)
+                frame_small = cv2.resize(frame, (new_width, new_height))
+            else:
+                frame_small = frame
 
-#             print("Head Pose Error:", e)
+            faces = self.app.get(frame_small)
+            now = time.time()
+            all_cheatings = []
 
-#             return None
-# --------------------------
-# import cv2
-# import time
-# import insightface
-# from collections import defaultdict
+            # =========================
+            # ✅ كشف الطلاب الغائبين بشكل مستقل
+            # =========================
+            if self.expected_students:
+                # حدد أي الطلاب موجودون الآن
+                present_student_ids = set()
+                for face in faces:
+                    matched = self._match_face_to_student(face.embedding)
+                    if matched:
+                        present_student_ids.add(matched["student_id"])
+
+                # فحص كل طالب متوقع
+                for student in self.expected_students:
+                    sid = student["student_id"]
+                    sname = student["student_name"]
+
+                    if sid not in present_student_ids:
+                        # الطالب غائب - ابدأ العد
+                        if sid not in self.student_absent_since:
+                            self.student_absent_since[sid] = now
+                            print(f"⚠️ الطالب {sname} اختفى من الكاميرا")
+                        elif now - self.student_absent_since[sid] >= self.required_seconds["no_face"]:
+                            key = f"no_face_{sid}"
+                            last = self.last_reported.get(key, 0)
+                            if now - last >= self.cooldown:
+                                self.last_reported[key] = now
+                                self.play_alert()
+                                all_cheatings.append({
+                                    "cheating_type_id": 7,
+                                    "type_ar": "محاولة مغادرة الكاميرا",
+                                    "type_en": "Leaving Camera",
+                                    "confidence": 0.9,
+                                    "face_embedding": student["embedding"]
+                                })
+                                print(f"🚨 تم تسجيل غياب الطالب: {sname}")
+                    else:
+                        # الطالب موجود - إعادة تعيين
+                        if sid in self.student_absent_since:
+                            del self.student_absent_since[sid]
+
+            else:
+                # =========================
+                # fallback: لا يوجد طلاب محددون
+                # =========================
+                if len(faces) == 0:
+                    if self.start_time["no_face"] is None:
+                        self.start_time["no_face"] = now
+                    elif now - self.start_time["no_face"] >= self.required_seconds["no_face"]:
+                        last = self.last_reported.get("no_face", 0)
+                        if now - last >= self.cooldown:
+                            self.last_reported["no_face"] = now
+                            self.play_alert()
+                            return [{
+                                "cheating_type_id": 7,
+                                "type_ar": "محاولة مغادرة الكاميرا",
+                                "type_en": "Leaving Camera",
+                                "confidence": 0.9
+                            }]
+                    return []
+                else:
+                    self.start_time["no_face"] = None
+
+            # =========================
+            # فحص حركة الرأس لكل وجه موجود
+            # =========================
+            for idx, face in enumerate(faces):
+                yaw, pitch, roll = face.pose
+
+                if idx == 0:
+                    cv2.putText(frame, f"Yaw: {yaw:.1f}", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    cv2.putText(frame, f"Pitch: {pitch:.1f}", (10, 60),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+                # 👀 النظر بعيد عن الشاشة
+                if abs(yaw) > self.yaw_threshold:
+                    key = f"look_away_{idx}"
+                    if self.start_time[key] is None:
+                        self.start_time[key] = now
+                    elif now - self.start_time[key] >= self.required_seconds["look_away"]:
+                        last = self.last_reported.get(key, 0)
+                        if now - last >= self.cooldown:
+                            self.last_reported[key] = now
+                            self.play_alert()
+                            all_cheatings.append({
+                                "cheating_type_id": 4,
+                                "type_ar": "النظر بعيداً عن الشاشة",
+                                "type_en": "Looking Away",
+                                "confidence": abs(yaw) / 90,
+                                "face_embedding": face.embedding.astype(np.float32).tobytes()
+                            })
+                else:
+                    key = f"look_away_{idx}"
+                    self.start_time[key] = None
+
+                # 👇 حركة رأس غير طبيعية
+                if abs(pitch) > self.pitch_threshold:
+                    key = f"head_movement_{idx}"
+                    if self.start_time[key] is None:
+                        self.start_time[key] = now
+                    elif now - self.start_time[key] >= self.required_seconds["head_movement"]:
+                        last = self.last_reported.get(key, 0)
+                        if now - last >= self.cooldown:
+                            self.last_reported[key] = now
+                            self.play_alert()
+                            all_cheatings.append({
+                                "cheating_type_id": 5,
+                                "type_ar": "حركة رأس غير طبيعية",
+                                "type_en": "Abnormal Head Movement",
+                                "confidence": abs(pitch) / 90,
+                                "face_embedding": face.embedding.astype(np.float32).tobytes()
+                            })
+                else:
+                    key = f"head_movement_{idx}"
+                    self.start_time[key] = None
+
+            return all_cheatings
+
+        except Exception as e:
+            print("Head Pose Error:", e)
+            return []
+
+
+# =========================
+# 🔹 تشغيل مستقل
+# =========================
+if __name__ == "__main__":
+
+    detector = HeadPoseService()
+    cap = cv2.VideoCapture(0)
+
+    print("🎥 Camera started... Press ESC to exit")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        cheatings = detector.detect_head_pose(frame)
+
+        for cheating in cheatings:
+            print(f"🚨 {cheating['type_ar']} | {cheating['confidence']:.2f}")
+            cv2.putText(frame, cheating["type_ar"], (10, 100),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        cv2.imshow("Head Pose Test", frame)
+
+        if cv2.waitKey(1) & 0xFF == 27:
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    
+# -------------------------
+# الكود الصحيح لطالب واحد فقط
+# import cv2 #تشغيل الكاميرا ومعالجة الصور والفيديو
+# import time #حساب الزمن ومدة استمرار السلوك
+# import insightface #مكتبه تتبع حركه الراس
+# from collections import defaultdict #تخزين أوقات الحالات دون ظهور أخطاء عند عدم وجود مفتاح
+# #
 # import winsound  # الصوت على Windows
 
-# class HeadPoseService:
-
-#     def __init__(self):
-
-#         self.app = insightface.app.FaceAnalysis(name="buffalo_l")
-#         self.app.prepare(ctx_id=-1)
-
-#         # الحدود
-#         self.yaw_threshold = 30
-#         self.pitch_threshold = 25
-
-#         # الوقت بالثواني
-#         self.required_seconds = {
-#             "look_away": 0.5,
-#             "head_movement": 0.5,
-#             "no_face": 0.8
-#         }
-
-#         self.start_time = defaultdict(lambda: None)
-
-#         # cooldown
-#         self.cooldown = 8
-#         self.last_reported = {}
-
-#         print("✅ HeadPose model loaded")
-
-#     # =========================
-#     def play_alert(self):
-#         try:
-#             winsound.Beep(1000, 300)
-#             print("🔊 Sound triggered")
-#         except:
-#             pass
-
-#     # =========================
-#     def detect(self, frame):
-
-#         try:
-#             faces = self.app.get(frame)
-#             detected_types = []
-
-#             now = time.time()
-
-#             # 🚪 لا يوجد وجه
-#             if len(faces) == 0:
-#                 if self.start_time["no_face"] is None:
-#                     self.start_time["no_face"] = now
-
-#                 elif now - self.start_time["no_face"] >= self.required_seconds["no_face"]:
-#                     detected_types.append(("no_face", {
-#                         "cheating_type_id": 7,
-#                         "type_ar": "محاولة مغادرة الكاميرا",
-#                         "type_en": "Leaving Camera",
-#                         "confidence": 0.9
-#                     }))
-#             else:
-#                 self.start_time["no_face"] = None
-
-#                 face = faces[0]
-#                 yaw, pitch, roll = face.pose
-
-#                 cv2.putText(frame, f"Yaw: {yaw:.1f}", (10, 30),
-#                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-#                 cv2.putText(frame, f"Pitch: {pitch:.1f}", (10, 60),
-#                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-#                 # 👀 النظر بعيد
-#                 if abs(yaw) > self.yaw_threshold:
-#                     if self.start_time["look_away"] is None:
-#                         self.start_time["look_away"] = now
-#                     elif now - self.start_time["look_away"] >= self.required_seconds["look_away"]:
-#                         detected_types.append(("look_away", {
-#                             "cheating_type_id": 4,
-#                             "type_ar": "النظر بعيداً عن الشاشة",
-#                             "type_en": "Looking Away",
-#                             "confidence": abs(yaw) / 90
-#                         }))
-#                 else:
-#                     self.start_time["look_away"] = None
-
-#                 # 👇 حركة غير طبيعية
-#                 if abs(pitch) > self.pitch_threshold:
-#                     if self.start_time["head_movement"] is None:
-#                         self.start_time["head_movement"] = now
-#                     elif now - self.start_time["head_movement"] >= self.required_seconds["head_movement"]:
-#                         detected_types.append(("head_movement", {
-#                             "cheating_type_id": 5,
-#                             "type_ar": "حركة رأس غير طبيعية",
-#                             "type_en": "Abnormal Head Movement",
-#                             "confidence": abs(pitch) / 90
-#                         }))
-#                 else:
-#                     self.start_time["head_movement"] = None
-
-#             # =========================
-#             # cooldown
-#             # =========================
-#             final_detections = []
-
-#             for key, data in detected_types:
-#                 last = self.last_reported.get(key, 0)
-#                 if now - last >= self.cooldown:
-#                     self.last_reported[key] = now
-#                     final_detections.append(data)
-#                     self.play_alert()
-
-#             return final_detections
-
-#         except Exception as e:
-#             print("Head Pose Error:", e)
-#             return []
-
-#     # =========================
-#     def detect_cheating(self, frame):
-#         return self.detect(frame)
-
-#     # ✅ الحل الأول (لحل الخطأ)
-#     def detect_head_pose(self, frame):
-#         return self.detect(frame)
-
-
-# # =========================
-# # تشغيل مستقل
-# # =========================
-# if __name__ == "__main__":
-
-#     detector = HeadPoseService()
-#     cap = cv2.VideoCapture(0)
-
-#     print("🎥 Camera started... Press ESC to exit")
-
-#     while True:
-#         ret, frame = cap.read()
-#         if not ret:
-#             break
-
-#         detections = detector.detect_cheating(frame)
-
-#         for d in detections:
-#             print(f"🚨 {d['type_ar']} | {d['confidence']:.2f}")
-#             cv2.putText(frame, d["type_ar"], (10, 100),
-#                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-#         cv2.imshow("Head Pose Test", frame)
-
-#         if cv2.waitKey(1) & 0xFF == 27:
-#             break
-
-#     cap.release()
-#     cv2.destroyAllWindows()
-# ------------------------------------
-# الصح
-# import cv2
-# import time
-# import insightface
-# from collections import defaultdict
-# import winsound  # الصوت على Windows
-
-# class HeadPoseService:
-
-#     def __init__(self):
-
-#         self.app = insightface.app.FaceAnalysis(name="buffalo_l")
-#         self.app.prepare(ctx_id=-1)
-
-#         # الحدود
-#         self.yaw_threshold = 30   # التفت يمين/يسار
-#         self.pitch_threshold = 25 # حركة رأس للأعلى/الأسفل
-
-#         # الوقت بالثواني لتحديد الغش
-#         self.required_seconds = {
-#             "look_away": 0.5,       # التفت أكثر من 0.5 ثانية
-#             "head_movement": 0.5,   # حركة رأس غير طبيعية أكثر من 0.5 ثانية
-#             "no_face": 0.8           # لا يوجد وجه (سنوقف استخدامها للحظي)
-#         }
-
-#         # وقت بدء الحالة
-#         self.start_time = defaultdict(lambda: None)
-
-#         # منع التكرار
-#         self.cooldown = 8  # ثواني
-#         self.last_reported = {}
-
-#         print("✅ HeadPose model loaded")
-
-#     # =========================
-#     def play_alert(self):
-#         try:
-#             winsound.Beep(1000, 300)  # تردد + مدة
-#             print("🔊 Sound triggered")
-#         except:
-#             pass
-
-#     # =========================
-#     def detect(self, frame):
-
-#         try:
-#             faces = self.app.get(frame)
-#             detected_types = []
-
-#             now = time.time()
-
-#             # 🚪 لا يوجد وجه --> معلق، لن يتم إصدار صوت أو طباعة
-#             if len(faces) == 0:
-#                 # إذا أحببت، يمكن تسجيل الوقت هنا لحفظه لاحقًا مع الفيديو الكامل
-#                 self.start_time["no_face"] = now  # فقط للتسجيل، لا غش لحظي
-#             else:
-#                 self.start_time["no_face"] = None  # إعادة تعيين عند ظهور الوجه
-
-#                 face = faces[0]
-#                 yaw, pitch, roll = face.pose
-
-#                 # عرض القيم على الفيديو
-#                 cv2.putText(frame, f"Yaw: {yaw:.1f}", (10, 30),
-#                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-#                 cv2.putText(frame, f"Pitch: {pitch:.1f}", (10, 60),
-#                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-#                 # 👀 النظر بعيد
-#                 if abs(yaw) > self.yaw_threshold:
-#                     if self.start_time["look_away"] is None:
-#                         self.start_time["look_away"] = now
-#                     elif now - self.start_time["look_away"] >= self.required_seconds["look_away"]:
-#                         detected_types.append(("look_away", {
-#                             "cheating_type_id": 4,
-#                             "type_ar": "النظر بعيداً عن الشاشة",
-#                             "type_en": "Looking Away",
-#                             "confidence": abs(yaw) / 90
-#                         }))
-#                 else:
-#                     self.start_time["look_away"] = None
-
-#                 # 👇 حركة غير طبيعية
-#                 if abs(pitch) > self.pitch_threshold:
-#                     if self.start_time["head_movement"] is None:
-#                         self.start_time["head_movement"] = now
-#                     elif now - self.start_time["head_movement"] >= self.required_seconds["head_movement"]:
-#                         detected_types.append(("head_movement", {
-#                             "cheating_type_id": 5,
-#                             "type_ar": "حركة رأس غير طبيعية",
-#                             "type_en": "Abnormal Head Movement",
-#                             "confidence": abs(pitch) / 90
-#                         }))
-#                 else:
-#                     self.start_time["head_movement"] = None
-
-#             # =========================
-#             # تطبيق cooldown + منع التكرار
-#             # =========================
-#             final_detections = []
-
-#             for key, data in detected_types:
-#                 last = self.last_reported.get(key, 0)
-#                 if now - last >= self.cooldown:
-#                     self.last_reported[key] = now
-#                     final_detections.append(data)
-#                     self.play_alert()
-
-#             return final_detections
-
-#         except Exception as e:
-#             print("Head Pose Error:", e)
-#             return []
-
-#     # =========================
-#     def detect_cheating(self, frame):
-#         return self.detect(frame)
-
-
-# # =========================
-# # تشغيل مستقل
-# # =========================
-# if __name__ == "__main__":
-
-#     detector = HeadPoseService()
-#     cap = cv2.VideoCapture(0)
-
-#     print("🎥 Camera started... Press ESC to exit")
-
-#     while True:
-#         ret, frame = cap.read()
-#         if not ret:
-#             break
-
-#         detections = detector.detect_cheating(frame)
-
-#         for d in detections:
-#             print(f"🚨 {d['type_ar']} | {d['confidence']:.2f}")
-#             cv2.putText(frame, d["type_ar"], (10, 100),
-#                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-#         cv2.imshow("Head Pose Test", frame)
-
-#         if cv2.waitKey(1) & 0xFF == 27:
-#             break
-
-#     cap.release()
-#     cv2.destroyAllWindows()
-# ------------------------------------
-# import cv2
-# import time
-# import os
-# import insightface
-# from collections import defaultdict
-# import winsound  # الصوت على Windows
 
 # class HeadPoseService:
 
@@ -393,24 +268,28 @@
 
 #         # 🔹 تحميل موديل الوجه
 #         self.app = insightface.app.FaceAnalysis(name="buffalo_l")
-#         self.app.prepare(ctx_id=-1)
+#         self.app.prepare(ctx_id=-1, det_size=(320, 320))  # حجم أصغر للكشف الأسرع
 
 #         # 🔹 حدود الحركة
-#         self.yaw_threshold = 30   # التفت يمين/يسار
-#         self.pitch_threshold = 25 # حركة رأس للأعلى/الأسفل
+#         self.yaw_threshold = 30   #  التفت يمين/يسار 30 درجه واستمر في الاتفات لمده 0.3 حاله غش
+#         self.pitch_threshold = 25 # حركة رأس للأعلى/الأسفل 25 درجه واستمر 0.5
 
 #         # ⏱️ الوقت بالثواني لتحديد الغش
 #         self.required_seconds = {
 #             "look_away": 0.5,
-#             "head_movement": 0.5,
-#             "no_face": 5  # وجه مختفي أكثر من 5 ثواني = غش
+#             "head_movement": 0.3,
+#             "no_face": 3  # وجه مختفي أكثر من 2 ثواني = غش
 #         }
 
 #         # ⏱️ وقت بدء الحالة
+#         #وهذا هي مهمه مكتبه التي تمنع الاخطا نفترض انه لايوجد داخل القاموس  لن يتوقف النظام بل سيطبع كلمه نن none 
+#         #"look_away": 0.5,
+#         # "head_movement": 0.3,
+#         # "no_face": 3 
 #         self.start_time = defaultdict(lambda: None)
 
 #         # ⛔ منع التكرار
-#         self.cooldown = 8  # ثواني
+#         self.cooldown = 5  # ثواني
 #         self.last_reported = {}
 
 #         print("✅ HeadPose model loaded")
@@ -428,7 +307,17 @@
 #     # كشف حالات الغش
 #     def detect_head_pose(self, frame):
 #         try:
-#             faces = self.app.get(frame)
+#             # تصغير الفريم لتسريع المعالجة
+#             height, width = frame.shape[:2]
+#             if width > 640:
+#                 scale = 640 / width
+#                 new_width = 640
+#                 new_height = int(height * scale)
+#                 frame_small = cv2.resize(frame, (new_width, new_height))
+#             else:
+#                 frame_small = frame
+                
+#             faces = self.app.get(frame_small)
 #             now = time.time()
 
 #             # =========================
@@ -494,7 +383,7 @@
 #                         self.last_reported["head_movement"] = now
 #                         self.play_alert()
 #                         return {
-#                             "cheating_type_id": 5,
+#                             "cheating_type_id": 4,
 #                             "type_ar": "حركة رأس غير طبيعية",
 #                             "type_en": "Abnormal Head Movement",
 #                             "confidence": abs(pitch) / 90
@@ -514,49 +403,22 @@
 # # =========================
 # if __name__ == "__main__":
 
-#     # الكاميرا الخارجية — Stream الثاني 30 FPS @ 640x480 (أخف وأسرع)
-#     RTSP_URL = "rtsp://admin:TVSHZW@192.168.137.32:554/Streaming/Channels/102"
-#     # Stream الأول 1080p @ 12.5 FPS — ثقيل، موقوف
-#     # RTSP_URL = "rtsp://admin:TVSHZW@192.168.137.32:554/Streaming/Channels/101"
-#     # كاميرا الجهاز موقوفة
-#     # cap = cv2.VideoCapture(0)
-
 #     detector = HeadPoseService()
+#     cap = cv2.VideoCapture(0)
 
-#     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|loglevel;quiet"
-#     cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
-#     cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
-
-#     if not cap.isOpened():
-#         print("❌ فشل الاتصال بالكاميرا")
-#         exit()
-
-#     fps = cap.get(cv2.CAP_PROP_FPS) or 30
-#     print(f"🎥 Camera started | FPS: {fps} | Press ESC to exit")
-
-#     fail_count = 0
+#     print("🎥 Camera started... Press ESC to exit")
 
 #     while True:
 #         ret, frame = cap.read()
 #         if not ret:
-#             fail_count += 1
-#             if fail_count > 10:
-#                 print("❌ انقطع الاتصال، إعادة الاتصال...")
-#                 cap.release()
-#                 time.sleep(2)
-#                 cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
-#                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
-#                 fail_count = 0
-#             continue
-
-#         fail_count = 0  # إعادة العداد عند نجاح القراءة
+#             break
 
 #         cheating = detector.detect_head_pose(frame)
 
 #         if cheating:
 #             print(f"🚨 {cheating['type_ar']} | {cheating['confidence']:.2f}")
 #             cv2.putText(frame, cheating["type_ar"], (10, 100),
-#                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+#                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
 #         cv2.imshow("Head Pose Test", frame)
 
@@ -565,351 +427,6 @@
 
 #     cap.release()
 #     cv2.destroyAllWindows()
-# ----------------------------------
-# لاخر تحديث  كود الكيمرا 
-# import cv2
-# import time
-# import insightface
-# from collections import defaultdict
-# import winsound
-# import threading
-
-# # =========================
-# # Threaded Video Capture لتجنب تعليق الفيديو
-# class VideoStream:
-#     def __init__(self, url):
-#         self.cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-#         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-#         self.ret, self.frame = self.cap.read()
-#         self.running = True
-#         self.thread = threading.Thread(target=self.update, daemon=True)
-#         self.thread.start()
-
-#     def update(self):
-#         while self.running:
-#             ret, frame = self.cap.read()
-#             if ret:
-#                 self.ret = ret
-#                 self.frame = frame
-
-#     def read(self):
-#         return self.ret, self.frame
-
-#     def stop(self):
-#         self.running = False
-#         self.thread.join()
-#         self.cap.release()
-
-
-# # =========================
-# # كشف حركة الرأس
-# class HeadPoseService:
-
-#     def __init__(self):
-#         self.app = insightface.app.FaceAnalysis(name="buffalo_l")
-#         self.app.prepare(ctx_id=-1)
-
-#         self.yaw_threshold = 30
-#         self.pitch_threshold = 25
-
-#         self.required_seconds = {
-#             "look_away": 0.5,
-#             "head_movement": 0.5,
-#             "no_face": 5
-#         }
-
-#         self.start_time = defaultdict(lambda: None)
-#         self.cooldown = 5
-#         self.last_reported = {}
-#         print("✅ HeadPose model loaded")
-
-#     def play_alert(self):
-#         try:
-#             winsound.Beep(1000, 300)
-#         except:
-#             pass
-
-#     def detect_head_pose(self, frame):
-#         try:
-#             faces = self.app.get(frame)
-#             now = time.time()
-
-#             # 🚪 لا يوجد وجه
-#             if len(faces) == 0:
-#                 if self.start_time["no_face"] is None:
-#                     self.start_time["no_face"] = now
-#                 elif now - self.start_time["no_face"] >= self.required_seconds["no_face"]:
-#                     last = self.last_reported.get("no_face", 0)
-#                     if now - last >= self.cooldown:
-#                         self.last_reported["no_face"] = now
-#                         self.play_alert()
-#                         return {
-#                             "cheating_type_id": 7,
-#                             "type_ar": "محاولة مغادرة الكاميرا",
-#                             "type_en": "Leaving Camera",
-#                             "confidence": 0.9
-#                         }
-#                 return None
-#             else:
-#                 self.start_time["no_face"] = None
-
-#             face = faces[0]
-#             yaw, pitch, roll = face.pose
-
-#             cv2.putText(frame, f"Yaw: {yaw:.1f}", (10, 30),
-#                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-#             cv2.putText(frame, f"Pitch: {pitch:.1f}", (10, 60),
-#                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-#             # 👀 النظر بعيد عن الشاشة
-#             if abs(yaw) > self.yaw_threshold:
-#                 if self.start_time["look_away"] is None:
-#                     self.start_time["look_away"] = now
-#                 elif now - self.start_time["look_away"] >= self.required_seconds["look_away"]:
-#                     last = self.last_reported.get("look_away", 0)
-#                     if now - last >= self.cooldown:
-#                         self.last_reported["look_away"] = now
-#                         self.play_alert()
-#                         return {
-#                             "cheating_type_id": 4,
-#                             "type_ar": "النظر بعيداً عن الشاشة",
-#                             "type_en": "Looking Away",
-#                             "confidence": abs(yaw) / 90
-#                         }
-#             else:
-#                 self.start_time["look_away"] = None
-
-#             # 👇 حركة رأس غير طبيعية
-#             if abs(pitch) > self.pitch_threshold:
-#                 if self.start_time["head_movement"] is None:
-#                     self.start_time["head_movement"] = now
-#                 elif now - self.start_time["head_movement"] >= self.required_seconds["head_movement"]:
-#                     last = self.last_reported.get("head_movement", 0)
-#                     if now - last >= self.cooldown:
-#                         self.last_reported["head_movement"] = now
-#                         self.play_alert()
-#                         return {
-#                             "cheating_type_id": 5,
-#                             "type_ar": "حركة رأس غير طبيعية",
-#                             "type_en": "Abnormal Head Movement",
-#                             "confidence": abs(pitch) / 90
-#                         }
-#             else:
-#                 self.start_time["head_movement"] = None
-
-#             return None
-
-#         except Exception as e:
-#             print("Head Pose Error:", e)
-#             return None
-
-
-# # =========================
-# # تشغيل مستقل
-# if __name__ == "__main__":
-#     url = "rtsp://admin:TVSHZW@192.168.137.110:554/Streaming/Channels/101"
-#     stream = VideoStream(url)
-#     time.sleep(2)
-
-#     detector = HeadPoseService()
-
-#     print("🎥 Camera started... Press ESC to exit")
-
-#     while True:
-#         ret, frame = stream.read()
-#         if not ret or frame is None:
-#             continue
-
-#         frame = cv2.resize(frame, (480, 360))
-
-#         cheating = detector.detect_head_pose(frame)
-
-#         if cheating:
-#             print(f"🚨 {cheating['type_ar']} | {cheating.get('confidence', 0):.2f}")
-#             cv2.putText(frame, cheating["type_ar"], (10, 100),
-#                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-#         cv2.imshow("Head Pose Camera", frame)
-
-#         if cv2.waitKey(1) & 0xFF == 27:
-#             break
-
-#     stream.stop()
-#     cv2.destroyAllWindows()
-# -------------------------
-import cv2 #تشغيل الكاميرا ومعالجة الصور والفيديو
-import time #حساب الزمن ومدة استمرار السلوك
-import insightface #مكتبه تتبع حركه الراس
-from collections import defaultdict #تخزين أوقات الحالات دون ظهور أخطاء عند عدم وجود مفتاح
-#
-import winsound  # الصوت على Windows
-
-
-class HeadPoseService:
-
-    def __init__(self):
-
-        # 🔹 تحميل موديل الوجه
-        self.app = insightface.app.FaceAnalysis(name="buffalo_l")
-        self.app.prepare(ctx_id=-1, det_size=(320, 320))  # حجم أصغر للكشف الأسرع
-
-        # 🔹 حدود الحركة
-        self.yaw_threshold = 30   #  التفت يمين/يسار 30 درجه واستمر في الاتفات لمده 0.3 حاله غش
-        self.pitch_threshold = 25 # حركة رأس للأعلى/الأسفل 25 درجه واستمر 0.5
-
-        # ⏱️ الوقت بالثواني لتحديد الغش
-        self.required_seconds = {
-            "look_away": 0.5,
-            "head_movement": 0.3,
-            "no_face": 3  # وجه مختفي أكثر من 2 ثواني = غش
-        }
-
-        # ⏱️ وقت بدء الحالة
-        #وهذا هي مهمه مكتبه التي تمنع الاخطا نفترض انه لايوجد داخل القاموس  لن يتوقف النظام بل سيطبع كلمه نن none 
-        #"look_away": 0.5,
-        # "head_movement": 0.3,
-        # "no_face": 3 
-        self.start_time = defaultdict(lambda: None)
-
-        # ⛔ منع التكرار
-        self.cooldown = 5  # ثواني
-        self.last_reported = {}
-
-        print("✅ HeadPose model loaded")
-
-    # =========================
-    # 🔊 إصدار صوت تنبيه
-    def play_alert(self):
-        try:
-            winsound.Beep(1000, 300)  # تردد + مدة
-            print("🔊 Sound triggered")
-        except:
-            pass
-
-    # =========================
-    # كشف حالات الغش
-    def detect_head_pose(self, frame):
-        try:
-            # تصغير الفريم لتسريع المعالجة
-            height, width = frame.shape[:2]
-            if width > 640:
-                scale = 640 / width
-                new_width = 640
-                new_height = int(height * scale)
-                frame_small = cv2.resize(frame, (new_width, new_height))
-            else:
-                frame_small = frame
-                
-            faces = self.app.get(frame_small)
-            now = time.time()
-
-            # =========================
-            # 🚪 لا يوجد وجه
-            # =========================
-            if len(faces) == 0:
-                if self.start_time["no_face"] is None:
-                    self.start_time["no_face"] = now
-
-                elif now - self.start_time["no_face"] >= self.required_seconds["no_face"]:
-                    last = self.last_reported.get("no_face", 0)
-                    if now - last >= self.cooldown:
-                        self.last_reported["no_face"] = now
-                        self.play_alert()
-                        return {
-                            "cheating_type_id": 7,
-                            "type_ar": "محاولة مغادرة الكاميرا",
-                            "type_en": "Leaving Camera",
-                            "confidence": 0.9
-                        }
-                return None
-            else:
-                self.start_time["no_face"] = None  # إعادة التعيين عند ظهور الوجه
-
-            face = faces[0]
-            yaw, pitch, roll = face.pose
-
-            # عرض القيم على الفيديو
-            cv2.putText(frame, f"Yaw: {yaw:.1f}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            cv2.putText(frame, f"Pitch: {pitch:.1f}", (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-            # =========================
-            # 👀 النظر بعيد عن الشاشة
-            # =========================
-            if abs(yaw) > self.yaw_threshold:
-                if self.start_time["look_away"] is None:
-                    self.start_time["look_away"] = now
-                elif now - self.start_time["look_away"] >= self.required_seconds["look_away"]:
-                    last = self.last_reported.get("look_away", 0)
-                    if now - last >= self.cooldown:
-                        self.last_reported["look_away"] = now
-                        self.play_alert()
-                        return {
-                            "cheating_type_id": 4,
-                            "type_ar": "النظر بعيداً عن الشاشة",
-                            "type_en": "Looking Away",
-                            "confidence": abs(yaw) / 90
-                        }
-            else:
-                self.start_time["look_away"] = None
-
-            # =========================
-            # 👇 حركة رأس غير طبيعية
-            # =========================
-            if abs(pitch) > self.pitch_threshold:
-                if self.start_time["head_movement"] is None:
-                    self.start_time["head_movement"] = now
-                elif now - self.start_time["head_movement"] >= self.required_seconds["head_movement"]:
-                    last = self.last_reported.get("head_movement", 0)
-                    if now - last >= self.cooldown:
-                        self.last_reported["head_movement"] = now
-                        self.play_alert()
-                        return {
-                            "cheating_type_id": 4,
-                            "type_ar": "حركة رأس غير طبيعية",
-                            "type_en": "Abnormal Head Movement",
-                            "confidence": abs(pitch) / 90
-                        }
-            else:
-                self.start_time["head_movement"] = None
-
-            return None
-
-        except Exception as e:
-            print("Head Pose Error:", e)
-            return None
-
-
-# =========================
-# 🔹 تشغيل مستقل
-# =========================
-if __name__ == "__main__":
-
-    detector = HeadPoseService()
-    cap = cv2.VideoCapture(0)
-
-    print("🎥 Camera started... Press ESC to exit")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        cheating = detector.detect_head_pose(frame)
-
-        if cheating:
-            print(f"🚨 {cheating['type_ar']} | {cheating['confidence']:.2f}")
-            cv2.putText(frame, cheating["type_ar"], (10, 100),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-        cv2.imshow("Head Pose Test", frame)
-
-        if cv2.waitKey(1) & 0xFF == 27:
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
 # ----------------------------------
 #  لاخر تحديث حاليا الصح
 # import cv2
