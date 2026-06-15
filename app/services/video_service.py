@@ -221,93 +221,116 @@ class VideoMonitoringService:
             print(f"⚠️ فشل تسجيل الصوت: {e}")
 
     # =========================
-    # حفظ فيديو MP4
+    # حفظ فيديو MP4 - مع حماية من الأخطاء
     # =========================
     def save_video_clip(self, cap):
         if not self.enable_video:
             print("⚠ لن يتم حفظ الفيديو")
             return None, None
 
-        # نسخ الفريمات قبل الغش بشكل آمن
-        with self.buffer_lock:
-            if len(self.frame_buffer) == 0:
-                print("⚠ لا توجد فريمات في البافر")
+        try:
+            # نسخ الفريمات قبل الغش بشكل آمن
+            with self.buffer_lock:
+                if len(self.frame_buffer) == 0:
+                    print("⚠ لا توجد فريمات في البافر")
+                    return None, None
+                frames_before = list(self.frame_buffer)  # نسخة آمنة من الفريمات قبل الغش
+
+            timestamp = int(time.time())
+            temp_filename = f"temp_{timestamp}.avi"
+            audio_filename = f"temp_audio_{timestamp}.wav"
+            final_filename = f"video_{timestamp}.mp4"
+            temp_path = os.path.join(self.evidence_dir, temp_filename)
+            audio_path = os.path.join(self.evidence_dir, audio_filename)
+            full_path = os.path.join(self.evidence_dir, final_filename)
+
+            height, width, _ = frames_before[0].shape
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            out = cv2.VideoWriter(temp_path, fourcc, 20.0, (width, height))
+
+            # بدء تسجيل الصوت في خيط منفصل
+            total_duration = self.video_before_seconds + self.video_after_seconds
+            audio_thread = threading.Thread(
+                target=self._record_audio_thread,
+                args=(audio_path, total_duration, 16000),
+                daemon=True
+            )
+            audio_thread.start()
+
+            if not out.isOpened():
+                print("❌ فشل إنشاء الفيديو المؤقت")
                 return None, None
-            frames_before = list(self.frame_buffer)  # نسخة آمنة من الفريمات قبل الغش
 
-        timestamp = int(time.time())
-        temp_filename = f"temp_{timestamp}.avi"
-        audio_filename = f"temp_audio_{timestamp}.wav"
-        final_filename = f"video_{timestamp}.mp4"
-        temp_path = os.path.join(self.evidence_dir, temp_filename)
-        audio_path = os.path.join(self.evidence_dir, audio_filename)
-        full_path = os.path.join(self.evidence_dir, final_filename)
+            # 1️⃣ حفظ فريمات قبل الغش (من البافر)
+            print(f"📹 حفظ {len(frames_before)} فريم قبل الغش...")
+            for f in frames_before:
+                out.write(f)
 
-        height, width, _ = frames_before[0].shape
-        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        out = cv2.VideoWriter(temp_path, fourcc, 20.0, (width, height))
-
-        # بدء تسجيل الصوت في خيط منفصل
-        total_duration = self.video_before_seconds + self.video_after_seconds
-        audio_thread = threading.Thread(
-            target=self._record_audio_thread,
-            args=(audio_path, total_duration, 16000),
-            daemon=True
-        )
-        audio_thread.start()
-
-        if not out.isOpened():
-            print("❌ فشل إنشاء الفيديو المؤقت")
-            return None, None
-
-        # 1️⃣ حفظ فريمات قبل الغش (من البافر)
-        print(f"📹 حفظ {len(frames_before)} فريم قبل الغش...")
-        for f in frames_before:
-            out.write(f)
-
-        # 2️⃣ حفظ فريمات بعد الغش (حسب الإعدادات)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 20
-        frames_after_count = int(fps * self.video_after_seconds)
-        
-        print(f"📹 جاري تسجيل {self.video_after_seconds} ثانية بعد الغش...")
-        frames_after = []
-        start_time = time.time()
-        
-        # جمع الفريمات لمدة video_after_seconds
-        while len(frames_after) < frames_after_count:
-            with self.frame_lock:
-                if self.latest_frame is not None:
-                    frames_after.append(self.latest_frame.copy())
+            # 2️⃣ حفظ فريمات بعد الغش (حسب الإعدادات)
+            fps = cap.get(cv2.CAP_PROP_FPS) or 20
+            frames_after_count = int(fps * self.video_after_seconds)
             
-            time.sleep(1.0 / fps)  # انتظار حسب FPS
+            print(f"📹 جاري تسجيل {self.video_after_seconds} ثانية بعد الغش...")
+            frames_after = []
+            start_time = time.time()
             
-            # حماية من التعليق - إذا مر وقت أطول من المتوقع
-            if time.time() - start_time > self.video_after_seconds + 2:
-                print("⚠ انتهى وقت التسجيل")
-                break
-        
-        print(f"📹 حفظ {len(frames_after)} فريم بعد الغش...")
-        for f in frames_after:
-            out.write(f)
+            # جمع الفريمات لمدة video_after_seconds
+            while len(frames_after) < frames_after_count:
+                with self.frame_lock:
+                    if self.latest_frame is not None:
+                        frames_after.append(self.latest_frame.copy())
+                
+                time.sleep(1.0 / fps)  # انتظار حسب FPS
+                
+                # حماية من التعليق - إذا مر وقت أطول من المتوقع
+                if time.time() - start_time > self.video_after_seconds + 2:
+                    print("⚠ انتهى وقت التسجيل")
+                    break
+            
+            print(f"📹 حفظ {len(frames_after)} فريم بعد الغش...")
+            for f in frames_after:
+                out.write(f)
 
-        out.release()
+            out.release()
 
-        # انتظار انتهاء تسجيل الصوت
-        audio_thread.join(timeout=total_duration + 2)
+            # انتظار انتهاء تسجيل الصوت
+            audio_thread.join(timeout=total_duration + 2)
 
-        success = self._convert_to_h264(temp_path, full_path, audio_path)
-        
-        # حذف الملفات المؤقتة
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-        if not success:
+            success = self._convert_to_h264(temp_path, full_path, audio_path)
+            
+            # حذف الملفات المؤقتة
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+            if os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except:
+                    pass
+            if not success:
+                return None, None
+
+            total_duration = self.video_before_seconds + self.video_after_seconds
+            print(f"🎬 تم حفظ الفيديو ({total_duration} ثانية): {full_path}")
+            return full_path, "evidence/" + final_filename
+            
+        except Exception as e:
+            print(f"❌ خطأ في حفظ الفيديو: {e}")
+            # تنظيف الملفات المؤقتة عند حدوث خطأ
+            try:
+                if 'temp_path' in locals() and os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except:
+                pass
+            try:
+                if 'audio_path' in locals() and os.path.exists(audio_path):
+                    os.remove(audio_path)
+            except:
+                pass
+            # لا نوقف النظام - نستمر في العمل
             return None, None
-
-        total_duration = self.video_before_seconds + self.video_after_seconds
-        print(f"🎬 تم حفظ الفيديو ({total_duration} ثانية): {full_path}")
-        return full_path, "evidence/" + final_filename
 
     # =========================
     # إنذار صوتي
